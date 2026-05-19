@@ -1,0 +1,7 @@
+# Healthcare Resume Parser – Python dependencies
+# Install with: pip install -r requirements.txt
+
+streamlit>=1.35.0
+pdfplumber>=0.11.0
+anthropic>=0.28.0
+fpdf2>=2.7.9

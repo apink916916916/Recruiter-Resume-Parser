@@ -95,7 +95,7 @@ class CustomPDF(FPDF):
         self.line(self.l_margin, self.get_y(), 210 - self.r_margin, self.get_y())
         self.ln(4)
 
-    def bullet(self, text: str):
+def bullet(self, text: str):
         self.set_x(self.l_margin + 5)
         current_y = self.get_y()
         self.set_font("Helvetica", "", 10)
@@ -103,4 +103,4 @@ class CustomPDF(FPDF):
         
         self.set_xy(self.l_margin + 11, current_y)
         self.multi_cell(0, 6, self._clean(text))
-        self.set_y(self.get_y
+        self.set_y(self.get_y() + 1)

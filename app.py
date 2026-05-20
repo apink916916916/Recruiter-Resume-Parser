@@ -203,8 +203,8 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
     pdf.ln(4)
 
-    # FIXED LAYOUT NODE: Work History Section (No overlap, clean data ribbon)
-    pdf.section_heading("Employment History (7-Year Compliance Audit)")
+    # FIXED LAYOUT NODE: Employment History Section (Clean tracking coordinates)
+    pdf.section_heading("Employment History")
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
         
@@ -213,10 +213,13 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         if job.get("facility_state") and job.get("facility_state") != "N/A":
             title_company += f" ({job.get('facility_state')})"
             
-        # multi_cell allows long travel nurse titles to naturally wrap without smashing into dates
+        # Draw wrapped text blocks safely
         pdf.multi_cell(0, 5, pdf._clean(title_company))
         
-        # Build the institutional intelligence ribbon right beneath the title
+        # FIXED: Hard reset the layout cursor back to the left margin
+        pdf.set_x(pdf.l_margin)
+        
+        # Build the metadata data ribbon safely right beneath it
         pdf.set_font("Helvetica", "BI", 9)
         pdf.set_text_color(100, 110, 120)
         
@@ -228,14 +231,12 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
             ribbon_parts.append(f"Trauma: {metrics['trauma']}")
             ribbon_parts.append(f"Magnet: {metrics['magnet']}")
             
-            # Formats teaching facility labels professionally
             facility_type = "Teaching Hospital" if "Teaching" in metrics['teaching'] else "Non-Teaching"
             ribbon_parts.append(facility_type)
             
-        # Stitch fields together with clean, minimal bullets instead of harsh brackets
         metadata_ribbon = "  •  ".join(ribbon_parts)
         pdf.cell(0, 5, pdf._clean(metadata_ribbon), ln=True)
-        pdf.set_text_color(0, 0, 0) # reset text back to black
+        pdf.set_text_color(0, 0, 0) # Reset color configuration
         pdf.ln(1)
         
         for duty in job.get("duties", []): pdf.bullet(duty)

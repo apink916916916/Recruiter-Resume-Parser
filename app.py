@@ -234,7 +234,8 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.section_heading("Education Matrix")
         for edu in data.get("education", []): pdf.bullet(str(edu))
             
-    return pdf.output()
+    # FIXED: Explicitly convert the mutable bytearray output to standard bytes format
+    return bytes(pdf.output())
 
 # ---------------------------------------------------------
 # 7. STREAMLIT INTERFACE / GRAPHICAL RUNTIME
@@ -332,7 +333,6 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 if parsed_data:
                     parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
                     
-                    # Pass the safely pulled collection nodes directly to the canvas engine
                     final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
                     
                     st.balloons()
@@ -345,4 +345,3 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                         mime="application/pdf"
                     )
             except Exception as e:
-                st.error(f"Engine Exception Caught: {e}")

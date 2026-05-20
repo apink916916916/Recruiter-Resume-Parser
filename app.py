@@ -97,20 +97,17 @@ def enrich_work_history(work_history_list):
         company_name = job.get("company", "")
         state_filter = str(job.get("facility_state", "")).strip().upper()
         
-        # Skip lookups for gaps
         if company_name == "N/A" or "Gap" in job.get("title", ""):
             enriched_list.append(job)
             continue
             
-        # Filter DB by state to avoid overlapping common hospital names across America
         state_db = HOSPITAL_DB[HOSPITAL_DB['State'].str.upper() == state_filter] if state_filter in HOSPITAL_DB['State'].str.upper().values else HOSPITAL_DB
         
         if not state_db.empty:
             hospital_names = state_db['Hospital Name'].tolist()
-            # Perform a fast, intelligent fuzzy lookup to cross-reference matches
             best_match, score = process.extractOne(company_name, hospital_names) if hospital_names else (None, 0)
             
-            if score > 82:  # Confident matching threshold
+            if score > 82:
                 match_row = state_db[state_db['Hospital Name'] == best_match].iloc[0]
                 job["enriched_metrics"] = {
                     "beds": str(match_row.get("Bed Count", "Not Listed")),
@@ -118,7 +115,7 @@ def enrich_work_history(work_history_list):
                     "magnet": str(match_row.get("Magnet Status", "No")),
                     "teaching": str(match_row.get("Teaching Status", "Non-Teaching"))
                 }
-                job["company"] = best_match  # Clean up formatting to the official database name
+                job["company"] = best_match
                 
         enriched_list.append(job)
     return enriched_list
@@ -203,7 +200,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
     pdf.ln(4)
 
-    # ENHANCED: Work History & Compliance Section (Now prints database metadata!)
+    # Work History Section
     pdf.section_heading("Employment History (7-Year Compliance Audit)")
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
@@ -215,14 +212,13 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.set_font("Helvetica", "I", 10)
         pdf.cell(0, 6, pdf._clean(job.get("dates", "N/A")), ln=True, align="R")
         
-        # If Python found matching database metrics, stamp them out in a clean, shaded sub-header
         metrics = job.get("enriched_metrics")
         if metrics:
             pdf.set_font("Helvetica", "BI", 9)
             pdf.set_text_color(100, 110, 120)
             facility_badge = f" [Metrics -> Beds: {metrics['beds']} | Trauma: {metrics['trauma']} | Magnet: {metrics['magnet']} | {metrics['teaching']}]"
             pdf.cell(0, 5, pdf._clean(facility_badge), ln=True)
-            pdf.set_text_color(0, 0, 0) # reset text color
+            pdf.set_text_color(0, 0, 0)
             pdf.ln(1)
         else:
             pdf.ln(1)
@@ -271,37 +267,4 @@ with col2:
     if selected_states:
         for state in selected_states:
             c_mod, c_exp = st.columns([1, 1])
-            with c_mod: mod = st.selectbox(f"Modality ({state}):", options=MODALITIES, key=f"mod_{state}")
-            with c_exp: exp = st.text_input(f"Expiration Date ({state}):", placeholder="MM/YYYY", key=f"exp_{state}")
-            compiled_licenses.append({"state": state, "modality": mod, "exp_date": exp if exp else "Not Specified"})
-            st.markdown("---")
-
-    selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
-    compiled_certs = []
-    if selected_certs:
-        for cert in selected_certs:
-            exp_c = st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"cert_exp_{cert}")
-            compiled_certs.append({"name": cert, "exp_date": exp_c if exp_c else "Active"})
-
-# Execution Trigger
-if st.button("Generate Stitched Compliance Profile", type="primary"):
-    if not resume_raw_text:
-        st.error("Action Blocked: Please upload a resume file to initialize the parser engine.")
-    else:
-        with st.spinner("Analyzing timelines and indexing institutional intelligence..."):
-            parsed_json = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-            
-            # Request base data extraction from Claude
-            client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-            message = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=4000,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": f"Here is the full resume text to parse:\n\n{resume_text}" if 'resume_text' in locals() else f"Parse:\n\n{resume_raw_text}"}],
-            )
-            raw_content = message.content[0].text.strip()
-            if raw_content.startswith("
-http://googleusercontent.com/immersive_entry_chip/0
-http://googleusercontent.com/immersive_entry_chip/1
-
-Push these changes up to GitHub. Once Streamlit pulls down the update, drop a resume in—the resulting PDF will now dynamically print the bed sizes, trauma ratings, magnet recognitions, and teaching statuses right beneath the employer name!
+            with c_mod: mod = st.selectbox

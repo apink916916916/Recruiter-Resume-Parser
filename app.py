@@ -183,18 +183,21 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
             if line.strip(): pdf.bullet(line.strip())
         pdf.ln(4)
 
-    # Credentials Sections
+    # Verified Licenses Section
     pdf.section_heading("Verified Licenses")
     if manual_licenses:
-        for lic in manual_licenses: pdf.bullet(f"{lic['modality']} - {lic['state']} - Exp: {lic['exp_date']}")
+        for lic in manual_licenses: 
+            pdf.bullet(f"{lic['modality']} - {lic['state']} - Exp: {lic['exp_date']}")
     else:
         pdf.set_font("Helvetica", "I", 10)
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
     pdf.ln(4)
 
+    # Professional Certifications Section
     pdf.section_heading("Professional Certifications")
     if manual_certs:
-        for cert in manual_certs: pdf.bullet(f"{cert['name']} - Exp: {cert['exp_date']}")
+        for cert in manual_certs: 
+            pdf.bullet(f"{cert['name']} - Exp: {cert['exp_date']}")
     else:
         pdf.set_font("Helvetica", "I", 10)
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
@@ -263,8 +266,83 @@ with col1:
 with col2:
     st.subheader("2. Standardized Credentials Override")
     selected_states = st.multiselect("Manually Add Active State Licenses / Compacts:", options=STATES_LIST)
-    compiled_licenses = []
+    
     if selected_states:
         for state in selected_states:
             c_mod, c_exp = st.columns([1, 1])
-            with c_mod: mod = st.selectbox
+            with c_mod: 
+                st.selectbox(f"Modality ({state}):", options=MODALITIES, key=f"mod_{state}")
+            with c_exp: 
+                st.text_input(f"Expiration Date ({state}):", placeholder="MM/YYYY", key=f"exp_{state}")
+            st.markdown("---")
+
+    selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
+    if selected_certs:
+        for cert in selected_certs:
+            st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"cert_exp_{cert}")
+
+# Execution Trigger
+if st.button("Generate Stitched Compliance Profile", type="primary"):
+    if not resume_raw_text:
+        st.error("Action Blocked: Please upload a resume file to initialize the parser engine.")
+    else:
+        with st.spinner("Analyzing timelines and indexing institutional intelligence..."):
+            try:
+                # ---------------------------------------------------------
+                # STATE-SAFE COLLECTION BLOCK (Pulls straight from Session Memory)
+                # ---------------------------------------------------------
+                final_compiled_licenses = []
+                if selected_states:
+                    for state in selected_states:
+                        state_modality = st.session_state.get(f"mod_{state}", "RN")
+                        state_expiration = st.session_state.get(f"exp_{state}", "").strip()
+                        final_compiled_licenses.append({
+                            "state": state,
+                            "modality": state_modality,
+                            "exp_date": state_expiration if state_expiration else "Not Specified"
+                        })
+
+                final_compiled_certs = []
+                if selected_certs:
+                    for cert in selected_certs:
+                        cert_expiration = st.session_state.get(f"cert_exp_{cert}", "").strip()
+                        final_compiled_certs.append({
+                            "name": cert,
+                            "exp_date": cert_expiration if cert_expiration else "Active"
+                        })
+                # ---------------------------------------------------------
+
+                client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                message = client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=4000,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_raw_text}"}],
+                )
+                
+                raw_content = message.content[0].text.strip()
+                
+                if raw_content.startswith("```json"):
+                    raw_content = raw_content.split("```json")[1].split("```")[0].strip()
+                elif raw_content.startswith("```"):
+                    raw_content = raw_content.split("```")[1].split("```")[0].strip()
+                
+                parsed_data = json.loads(raw_content)
+                
+                if parsed_data:
+                    parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
+                    
+                    # Pass the safely pulled collection nodes directly to the canvas engine
+                    final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
+                    
+                    st.balloons()
+                    st.success("Candidate Profile generated successfully with integrated hospital metrics!")
+                    
+                    st.download_button(
+                        label="📥 Download Structured Candidate Profile (PDF)",
+                        data=final_pdf,
+                        file_name=f"Enriched_Profile_{parsed_data.get('name', 'Candidate')}.pdf",
+                        mime="application/pdf"
+                    )
+            except Exception as e:
+                st.error(f"Engine Exception Caught: {e}")

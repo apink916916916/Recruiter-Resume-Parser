@@ -234,7 +234,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.section_heading("Education Matrix")
         for edu in data.get("education", []): pdf.bullet(str(edu))
             
-    # FIXED: Explicitly convert the mutable bytearray output to standard bytes format
     return bytes(pdf.output())
 
 # ---------------------------------------------------------
@@ -289,9 +288,6 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
     else:
         with st.spinner("Analyzing timelines and indexing institutional intelligence..."):
             try:
-                # ---------------------------------------------------------
-                # STATE-SAFE COLLECTION BLOCK (Pulls straight from Session Memory)
-                # ---------------------------------------------------------
                 final_compiled_licenses = []
                 if selected_states:
                     for state in selected_states:
@@ -311,7 +307,6 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                             "name": cert,
                             "exp_date": cert_expiration if cert_expiration else "Active"
                         })
-                # ---------------------------------------------------------
 
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
@@ -345,3 +340,4 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                         mime="application/pdf"
                     )
             except Exception as e:
+                st.error(f"Engine Exception Caught: {e}")

@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Enhanced Data Matrix)
+Healthcare Resume Parser & Candidate Profile Generator (Enhanced Layout)
 =============================================================================
 """
 import streamlit as st
@@ -71,14 +71,17 @@ CRITICAL INSTRUCTIONS:
        "dates": "MM/YYYY - MM/YYYY",
        "duties": ["Timeline gap accounted for."]
      }
-4. Sort all entries in reverse chronological order.
+4. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
+5. Sort all history entries in reverse chronological order.
 
 Your output must be raw JSON matching this structure exactly:
 {
   "name": "",
   "contact_info": "",
   "summary": "",
-  "education": [],
+  "education": [
+    {"degree": "", "institution": "", "location": "", "date": ""}
+  ],
   "work_history": [
     {"title": "", "company": "", "facility_state": "", "dates": "", "duties": []}
   ]
@@ -145,14 +148,12 @@ class CustomPDF(FPDF):
         self.line(self.l_margin, self.get_y(), 210 - self.r_margin, self.get_y())
         self.ln(4)
 
+    # REBUILT: Bullet framework optimized to follow natural flow and avoid blank page bugs
     def bullet(self, text: str):
-        self.set_x(self.l_margin + 5)
-        current_y = self.get_y()
+        self.set_x(self.l_margin)
         self.set_font("Helvetica", "", 10)
-        self.cell(6, 6, "-")
-        self.set_xy(self.l_margin + 11, current_y)
-        self.multi_cell(0, 6, self._clean(text))
-        self.set_y(self.get_y() + 1)
+        self.multi_cell(0, 5, f" - {self._clean(text)}")
+        self.set_y(self.get_y() + 0.5)
 
 # ---------------------------------------------------------
 # 6. PROFILE STITCHING SYSTEM
@@ -203,23 +204,18 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
     pdf.ln(4)
 
-    # FIXED LAYOUT NODE: Employment History Section (Clean tracking coordinates)
+    # Employment History Section
     pdf.section_heading("Employment History")
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
         
-        # Build Title String
         title_company = f"{job.get('title', 'N/A')} - {job.get('company', 'N/A')}"
         if job.get("facility_state") and job.get("facility_state") != "N/A":
             title_company += f" ({job.get('facility_state')})"
             
-        # Draw wrapped text blocks safely
         pdf.multi_cell(0, 5, pdf._clean(title_company))
-        
-        # FIXED: Hard reset the layout cursor back to the left margin
         pdf.set_x(pdf.l_margin)
         
-        # Build the metadata data ribbon safely right beneath it
         pdf.set_font("Helvetica", "BI", 9)
         pdf.set_text_color(100, 110, 120)
         
@@ -236,16 +232,45 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
             
         metadata_ribbon = "  •  ".join(ribbon_parts)
         pdf.cell(0, 5, pdf._clean(metadata_ribbon), ln=True)
-        pdf.set_text_color(0, 0, 0) # Reset color configuration
+        pdf.set_text_color(0, 0, 0)
         pdf.ln(1)
         
         for duty in job.get("duties", []): pdf.bullet(duty)
         pdf.ln(2)
 
-    # Education Block
+    # UPDATED LAYOUT NODE: Cleaned Education parsing and naming rule execution
     if data.get("education"):
-        pdf.section_heading("Education Matrix")
-        for edu in data.get("education", []): pdf.bullet(str(edu))
+        pdf.section_heading("Education")
+        for edu in data.get("education", []):
+            if isinstance(edu, dict):
+                degree = str(edu.get("degree", "Degree Not Listed")).strip()
+                # Enforce standard shortcodes for consistency
+                if "aas in nursing" in degree.lower() or "associate" in degree.lower():
+                    degree = "ADN"
+                elif "bachelor" in degree.lower():
+                    degree = "BSN"
+                
+                date = str(edu.get("date", "")).strip()
+                institution = str(edu.get("institution", "")).strip()
+                location = str(edu.get("location", "")).strip()
+                
+                # Assembly logic matching your specific example format
+                edu_parts = []
+                if degree and date:
+                    edu_parts.append(f"{degree}, {date}")
+                elif degree:
+                    edu_parts.append(degree)
+                
+                if institution:
+                    edu_parts.append(institution)
+                if location:
+                    edu_parts.append(location)
+                    
+                line_text = " - ".join(edu_parts)
+            else:
+                line_text = str(edu)
+                
+            pdf.bullet(line_text)
             
     return bytes(pdf.output())
 

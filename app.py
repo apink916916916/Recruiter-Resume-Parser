@@ -203,28 +203,40 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.cell(0, 6, "None Declared/Listed", ln=True)
     pdf.ln(4)
 
-    # Work History Section
+    # FIXED LAYOUT NODE: Work History Section (No overlap, clean data ribbon)
     pdf.section_heading("Employment History (7-Year Compliance Audit)")
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
+        
+        # Build Title String
         title_company = f"{job.get('title', 'N/A')} - {job.get('company', 'N/A')}"
         if job.get("facility_state") and job.get("facility_state") != "N/A":
             title_company += f" ({job.get('facility_state')})"
             
-        pdf.cell(140, 6, pdf._clean(title_company))
-        pdf.set_font("Helvetica", "I", 10)
-        pdf.cell(0, 6, pdf._clean(job.get("dates", "N/A")), ln=True, align="R")
+        # multi_cell allows long travel nurse titles to naturally wrap without smashing into dates
+        pdf.multi_cell(0, 5, pdf._clean(title_company))
+        
+        # Build the institutional intelligence ribbon right beneath the title
+        pdf.set_font("Helvetica", "BI", 9)
+        pdf.set_text_color(100, 110, 120)
+        
+        ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
         
         metrics = job.get("enriched_metrics")
         if metrics:
-            pdf.set_font("Helvetica", "BI", 9)
-            pdf.set_text_color(100, 110, 120)
-            facility_badge = f" [Metrics -> Beds: {metrics['beds']} | Trauma: {metrics['trauma']} | Magnet: {metrics['magnet']} | {metrics['teaching']}]"
-            pdf.cell(0, 5, pdf._clean(facility_badge), ln=True)
-            pdf.set_text_color(0, 0, 0)
-            pdf.ln(1)
-        else:
-            pdf.ln(1)
+            ribbon_parts.append(f"Beds: {metrics['beds']}")
+            ribbon_parts.append(f"Trauma: {metrics['trauma']}")
+            ribbon_parts.append(f"Magnet: {metrics['magnet']}")
+            
+            # Formats teaching facility labels professionally
+            facility_type = "Teaching Hospital" if "Teaching" in metrics['teaching'] else "Non-Teaching"
+            ribbon_parts.append(facility_type)
+            
+        # Stitch fields together with clean, minimal bullets instead of harsh brackets
+        metadata_ribbon = "  •  ".join(ribbon_parts)
+        pdf.cell(0, 5, pdf._clean(metadata_ribbon), ln=True)
+        pdf.set_text_color(0, 0, 0) # reset text back to black
+        pdf.ln(1)
         
         for duty in job.get("duties", []): pdf.bullet(duty)
         pdf.ln(2)

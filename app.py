@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Enhanced Layout Filters)
+Healthcare Resume Parser & Candidate Profile Generator (Strict Status Filtering)
 =============================================================================
 """
 import streamlit as st
@@ -170,8 +170,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.set_font("Helvetica", "I", 10)
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
-    
-    # Note: Professional Summary has been intentionally removed from this layer execution
 
     # Recruiter Notes Section
     if highlights.strip():
@@ -233,12 +231,15 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         
         ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
         
-        # FILTER NODE: Only append facility metrics if hospital carries special statuses
+        # STRICT FILTER NODE: Only show trauma if it explicitly matches Level I-IV designations
         if metrics:
-            is_trauma = metrics['trauma'] != "Not Listed/None" and metrics['trauma'] != "Not Listed"
-            is_magnet = metrics['magnet'] == "Yes"
-            is_teaching = "Teaching" in metrics['teaching'] and "Non-Teaching" not in metrics['teaching']
+            trauma_raw = str(metrics.get("trauma", "")).upper()
+            is_trauma = any(lvl in trauma_raw for lvl in ["LEVEL I", "LEVEL II", "LEVEL III", "LEVEL IV"])
             
+            is_magnet = metrics.get("magnet") == "Yes"
+            is_teaching = "Teaching" in metrics.get("teaching", "") and "Non-Teaching" not in metrics.get("teaching", "")
+            
+            # Only print the asset ribbon if the hospital carries one of your core premium flags
             if is_trauma or is_magnet or is_teaching:
                 ribbon_parts.append(f"Beds: {metrics['beds']}")
                 if is_trauma: 

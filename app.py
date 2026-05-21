@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Enhanced Layout)
+Healthcare Resume Parser & Candidate Profile Generator (Enhanced Layout Filters)
 =============================================================================
 """
 import streamlit as st
@@ -58,8 +58,8 @@ MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL INSTRUCTIONS:
-1. DO NOT extract or look for Licenses or Certifications. Completely ignore those sections of the resume.
-2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST identify the 2-letter state code where that hospital is located and put it in the 'facility_state' field. If you cannot find it, default to "US".
+1. DO NOT extract or look for Licenses, Certifications, or Professional Summaries/Objectives. Completely ignore those sections of the resume.
+2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
 3. TIMELINE AUDIT (JOINT COMMISSION COMPLIANCE): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026.
    - Calculate gaps between positions. If a gap of more than 30 days is detected, you MUST insert a placeholder entry into the 'work_history' array.
    - BUFFER RULE: If job A ends in Month X and job B starts in Month X or X+1, do NOT count it as a gap.
@@ -67,6 +67,7 @@ CRITICAL INSTRUCTIONS:
      {
        "title": "Employment Gap / Personal Time",
        "company": "N/A",
+       "facility_city": "N/A",
        "facility_state": "N/A",
        "dates": "MM/YYYY - MM/YYYY",
        "duties": ["Timeline gap accounted for."]
@@ -78,12 +79,11 @@ Your output must be raw JSON matching this structure exactly:
 {
   "name": "",
   "contact_info": "",
-  "summary": "",
   "education": [
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
   "work_history": [
-    {"title": "", "company": "", "facility_state": "", "dates": "", "duties": []}
+    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "duties": []}
   ]
 }"""
 
@@ -114,9 +114,11 @@ def enrich_work_history(work_history_list):
                 match_row = state_db[state_db['Hospital Name'] == best_match].iloc[0]
                 job["enriched_metrics"] = {
                     "beds": str(match_row.get("Bed Count", "Not Listed")),
-                    "trauma": str(match_row.get("Trauma Status", "Not Listed")),
+                    "trauma": str(match_row.get("Trauma Status", "Not Listed/None")),
                     "magnet": str(match_row.get("Magnet Status", "No")),
-                    "teaching": str(match_row.get("Teaching Status", "Non-Teaching"))
+                    "teaching": str(match_row.get("Teaching Status", "Non-Teaching")),
+                    "city": str(match_row.get("City", "")).strip(),
+                    "state": str(match_row.get("State", "")).strip().upper()
                 }
                 job["company"] = best_match
                 
@@ -148,7 +150,6 @@ class CustomPDF(FPDF):
         self.line(self.l_margin, self.get_y(), 210 - self.r_margin, self.get_y())
         self.ln(4)
 
-    # REBUILT: Bullet framework optimized to follow natural flow and avoid blank page bugs
     def bullet(self, text: str):
         self.set_x(self.l_margin)
         self.set_font("Helvetica", "", 10)
@@ -170,12 +171,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
     
-    # Summary Block
-    if data.get("summary"):
-        pdf.section_heading("Professional Summary")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(0, 5, pdf._clean(data.get("summary")))
-        pdf.ln(4)
+    # Note: Professional Summary has been intentionally removed from this layer execution
 
     # Recruiter Notes Section
     if highlights.strip():
@@ -209,26 +205,48 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
         
+        # Determine exact City / State from verified database rows or fallback parser extraction
+        metrics = job.get("enriched_metrics")
+        if metrics and metrics.get("city") and metrics.get("state"):
+            geo_string = f"{metrics['city']}, {metrics['state']}"
+        else:
+            city_val = str(job.get("facility_city", "")).strip()
+            state_val = str(job.get("facility_state", "")).strip()
+            if city_val and state_val and city_val != "N/A" and state_val != "N/A":
+                geo_string = f"{city_val}, {state_val}"
+            elif state_val and state_val != "N/A":
+                geo_string = state_val
+            else:
+                geo_string = ""
+
+        # Assemble full employer header
         title_company = f"{job.get('title', 'N/A')} - {job.get('company', 'N/A')}"
-        if job.get("facility_state") and job.get("facility_state") != "N/A":
-            title_company += f" ({job.get('facility_state')})"
+        if geo_string:
+            title_company += f" ({geo_string})"
             
         pdf.multi_cell(0, 5, pdf._clean(title_company))
         pdf.set_x(pdf.l_margin)
         
+        # Build institutional ribbon ribbon formatting
         pdf.set_font("Helvetica", "BI", 9)
         pdf.set_text_color(100, 110, 120)
         
         ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
         
-        metrics = job.get("enriched_metrics")
+        # FILTER NODE: Only append facility metrics if hospital carries special statuses
         if metrics:
-            ribbon_parts.append(f"Beds: {metrics['beds']}")
-            ribbon_parts.append(f"Trauma: {metrics['trauma']}")
-            ribbon_parts.append(f"Magnet: {metrics['magnet']}")
+            is_trauma = metrics['trauma'] != "Not Listed/None" and metrics['trauma'] != "Not Listed"
+            is_magnet = metrics['magnet'] == "Yes"
+            is_teaching = "Teaching" in metrics['teaching'] and "Non-Teaching" not in metrics['teaching']
             
-            facility_type = "Teaching Hospital" if "Teaching" in metrics['teaching'] else "Non-Teaching"
-            ribbon_parts.append(facility_type)
+            if is_trauma or is_magnet or is_teaching:
+                ribbon_parts.append(f"Beds: {metrics['beds']}")
+                if is_trauma: 
+                    ribbon_parts.append(f"Trauma: {metrics['trauma']}")
+                if is_magnet: 
+                    ribbon_parts.append("Magnet Facility")
+                if is_teaching: 
+                    ribbon_parts.append("Teaching Hospital")
             
         metadata_ribbon = "  •  ".join(ribbon_parts)
         pdf.cell(0, 5, pdf._clean(metadata_ribbon), ln=True)
@@ -238,13 +256,12 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         for duty in job.get("duties", []): pdf.bullet(duty)
         pdf.ln(2)
 
-    # UPDATED LAYOUT NODE: Cleaned Education parsing and naming rule execution
+    # Education Section
     if data.get("education"):
         pdf.section_heading("Education")
         for edu in data.get("education", []):
             if isinstance(edu, dict):
                 degree = str(edu.get("degree", "Degree Not Listed")).strip()
-                # Enforce standard shortcodes for consistency
                 if "aas in nursing" in degree.lower() or "associate" in degree.lower():
                     degree = "ADN"
                 elif "bachelor" in degree.lower():
@@ -254,16 +271,15 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
                 institution = str(edu.get("institution", "")).strip()
                 location = str(edu.get("location", "")).strip()
                 
-                # Assembly logic matching your specific example format
                 edu_parts = []
-                if degree and date:
+                if degree and date: 
                     edu_parts.append(f"{degree}, {date}")
-                elif degree:
+                elif degree: 
                     edu_parts.append(degree)
                 
-                if institution:
+                if institution: 
                     edu_parts.append(institution)
-                if location:
+                if location: 
                     edu_parts.append(location)
                     
                 line_text = " - ".join(edu_parts)

@@ -49,7 +49,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS (With Fluff-Filtering rules)
+# 3. CONSTANTS & SYSTEM INSTRUCTIONS
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
@@ -381,4 +381,21 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 elif raw_content.startswith("```"):
                     raw_content = raw_content.split("```")[1].split("```")[0].strip()
                 
-                parsed_data = json.loads
+                parsed_data = json.loads(raw_content)
+                
+                if parsed_data:
+                    parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
+                    
+                    final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
+                    
+                    st.balloons()
+                    st.success("Candidate Profile generated successfully with integrated hospital metrics!")
+                    
+                    st.download_button(
+                        label="📥 Download Structured Candidate Profile (PDF)",
+                        data=final_pdf,
+                        file_name=f"Enriched_Profile_{parsed_data.get('name', 'Candidate')}.pdf",
+                        mime="application/pdf"
+                    )
+            except Exception as e:
+                st.error(f"Engine Exception Caught: {e}")

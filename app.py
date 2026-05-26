@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Strict Status Filtering)
+Healthcare Resume Parser & Candidate Profile Generator (Executive Distillation)
 =============================================================================
 """
 import streamlit as st
@@ -49,7 +49,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS
+# 3. CONSTANTS & SYSTEM INSTRUCTIONS (With Fluff-Filtering rules)
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
@@ -72,8 +72,11 @@ CRITICAL INSTRUCTIONS:
        "dates": "MM/YYYY - MM/YYYY",
        "duties": ["Timeline gap accounted for."]
      }
-4. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
-5. Sort all history entries in reverse chronological order.
+4. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Do not extract duties or clinical task lists verbatim. Summarize and synthesize their role into exactly 3 to 4 high-level, professional bullet points. 
+   - Strip out highly specific task lists, procedures, and equipment names (e.g., skip mentioning 'EGD, colonoscopy, RotoProne beds, IV lines, charting'). 
+   - Instead, capture the macro scope: Unit focus (e.g., high-acuity MSICU), daily patient load/acuity, core accountabilities, and any leadership/charge/preceptor functions.
+5. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
+6. Sort all history entries in reverse chronological order.
 
 Your output must be raw JSON matching this structure exactly:
 {
@@ -225,7 +228,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.multi_cell(0, 5, pdf._clean(title_company))
         pdf.set_x(pdf.l_margin)
         
-        # Build institutional ribbon ribbon formatting
+        # Build institutional ribbon formatting
         pdf.set_font("Helvetica", "BI", 9)
         pdf.set_text_color(100, 110, 120)
         
@@ -378,21 +381,4 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 elif raw_content.startswith("```"):
                     raw_content = raw_content.split("```")[1].split("```")[0].strip()
                 
-                parsed_data = json.loads(raw_content)
-                
-                if parsed_data:
-                    parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
-                    
-                    final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
-                    
-                    st.balloons()
-                    st.success("Candidate Profile generated successfully with integrated hospital metrics!")
-                    
-                    st.download_button(
-                        label="📥 Download Structured Candidate Profile (PDF)",
-                        data=final_pdf,
-                        file_name=f"Enriched_Profile_{parsed_data.get('name', 'Candidate')}.pdf",
-                        mime="application/pdf"
-                    )
-            except Exception as e:
-                st.error(f"Engine Exception Caught: {e}")
+                parsed_data = json.loads

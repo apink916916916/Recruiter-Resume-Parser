@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Executive Distillation)
+Healthcare Resume Parser & Candidate Profile Generator (Production Release v2.5)
 =============================================================================
 """
 import streamlit as st
@@ -49,7 +49,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS
+# 3. CONSTANTS & SYSTEM INSTRUCTIONS (With PRN Schema Integration)
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
@@ -70,13 +70,17 @@ CRITICAL INSTRUCTIONS:
        "facility_city": "N/A",
        "facility_state": "N/A",
        "dates": "MM/YYYY - MM/YYYY",
+       "prn_shifts_per_month": "Full-Time",
        "duties": ["Timeline gap accounted for."]
      }
 4. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Do not extract duties or clinical task lists verbatim. Summarize and synthesize their role into exactly 3 to 4 high-level, professional bullet points. 
    - Strip out highly specific task lists, procedures, and equipment names (e.g., skip mentioning 'EGD, colonoscopy, RotoProne beds, IV lines, charting'). 
    - Instead, capture the macro scope: Unit focus (e.g., high-acuity MSICU), daily patient load/acuity, core accountabilities, and any leadership/charge/preceptor functions.
-5. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
-6. Sort all history entries in reverse chronological order.
+5. PRN SHIFT TRACKING: For every position, look closely for text indicating shift frequency or commitments (e.g., 'worked 3 days a week', '2-4 shifts/month', 'per diem tier 3'). 
+   - If the job is PRN/Per Diem and mentions frequency, extract or calculate the estimated shifts per month and place it in the 'prn_shifts_per_month' field.
+   - If no frequency is explicitly stated but the title contains PRN or Per Diem, set the field to "PRN - Shifts Unspecified". If it's a standard full-time job, set it to "Full-Time".
+6. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
+7. Sort all history entries in reverse chronological order.
 
 Your output must be raw JSON matching this structure exactly:
 {
@@ -86,7 +90,7 @@ Your output must be raw JSON matching this structure exactly:
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
   "work_history": [
-    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "duties": []}
+    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "prn_shifts_per_month": "", "duties": []}
   ]
 }"""
 
@@ -206,7 +210,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
         
-        # Determine exact City / State from verified database rows or fallback parser extraction
         metrics = job.get("enriched_metrics")
         if metrics and metrics.get("city") and metrics.get("state"):
             geo_string = f"{metrics['city']}, {metrics['state']}"
@@ -233,6 +236,11 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         pdf.set_text_color(100, 110, 120)
         
         ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
+        
+        # Add PRN Volume tracking indicator to the text stream ribbon
+        prn_vol = job.get("prn_shifts_per_month", "Full-Time")
+        if prn_vol and prn_vol != "Full-Time":
+            ribbon_parts.append(f"Volume: {prn_vol}")
         
         # STRICT FILTER NODE: Only show trauma if it explicitly matches Level I-IV designations
         if metrics:
@@ -338,6 +346,24 @@ with col2:
     if selected_certs:
         for cert in selected_certs:
             st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"cert_exp_{cert}")
+            
+    # ADDED: Interactive Per Diem shift tracker entry field
+    st.markdown("---")
+    st.subheader("3. MSP Per Diem / PRN Shift Tracker")
+    st.write("If the candidate worked PRN, log the average monthly shifts uncovered during screening to stamp onto the profile:")
+    
+    prn_input_raw = st.text_area(
+        "Log PRN Volume (Format: Hospital Name: Shifts/Month)",
+        placeholder="Example:\nMarian Regional: 6 shifts/mo\nOsceola Regional: 4 shifts/mo",
+        height=100
+    )
+    
+    manual_prn_tracker = {}
+    if prn_input_raw.strip():
+        for line in prn_input_raw.split("\n"):
+            if ":" in line:
+                hosp, shifts = line.split(":", 1)
+                manual_prn_tracker[hosp.strip().lower()] = shifts.strip()
 
 # Execution Trigger
 if st.button("Generate Stitched Compliance Profile", type="primary"):
@@ -385,6 +411,20 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 
                 if parsed_data:
                     parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
+                    
+                    # ADDED: Loop to map user logged shift frequencies back into work history records
+                    for job in parsed_data.get("work_history", []):
+                        comp_name_lower = str(job.get("company", "")).lower()
+                        matched_shifts = None
+                        for key_hosp, value_shifts in manual_prn_tracker.items():
+                            if key_hosp in comp_name_lower:
+                                matched_shifts = value_shifts
+                                break
+                        
+                        if matched_shifts:
+                            job["prn_shifts_per_month"] = matched_shifts
+                        elif "prn_shifts_per_month" not in job or not job["prn_shifts_per_month"]:
+                            job["prn_shifts_per_month"] = "Full-Time"
                     
                     final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
                     

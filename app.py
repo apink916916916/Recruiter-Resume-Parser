@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Production Release v2.5)
+Healthcare Resume Parser & Candidate Profile Generator (Production Release v2.6)
 =============================================================================
 """
 import streamlit as st
@@ -49,7 +49,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS (With PRN Schema Integration)
+# 3. CONSTANTS & SYSTEM INSTRUCTIONS
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
@@ -237,7 +237,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         
         ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
         
-        # Add PRN Volume tracking indicator to the text stream ribbon
         prn_vol = job.get("prn_shifts_per_month", "Full-Time")
         if prn_vol and prn_vol != "Full-Time":
             ribbon_parts.append(f"Volume: {prn_vol}")
@@ -250,7 +249,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
             is_magnet = metrics.get("magnet") == "Yes"
             is_teaching = "Teaching" in metrics.get("teaching", "") and "Non-Teaching" not in metrics.get("teaching", "")
             
-            # Only print the asset ribbon if the hospital carries one of your core premium flags
             if is_trauma or is_magnet or is_teaching:
                 ribbon_parts.append(f"Beds: {metrics['beds']}")
                 if is_trauma: 
@@ -347,7 +345,6 @@ with col2:
         for cert in selected_certs:
             st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"cert_exp_{cert}")
             
-    # ADDED: Interactive Per Diem shift tracker entry field
     st.markdown("---")
     st.subheader("3. MSP Per Diem / PRN Shift Tracker")
     st.write("If the candidate worked PRN, log the average monthly shifts uncovered during screening to stamp onto the profile:")
@@ -402,9 +399,10 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 
                 raw_content = message.content[0].text.strip()
                 
-                if raw_content.startswith("```json"):
+                # REBUILT EXTRACTOR: Looks for code blocks anywhere in the string to block conversational errors
+                if "```json" in raw_content:
                     raw_content = raw_content.split("```json")[1].split("```")[0].strip()
-                elif raw_content.startswith("```"):
+                elif "```" in raw_content:
                     raw_content = raw_content.split("```")[1].split("```")[0].strip()
                 
                 parsed_data = json.loads(raw_content)
@@ -412,7 +410,6 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 if parsed_data:
                     parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
                     
-                    # ADDED: Loop to map user logged shift frequencies back into work history records
                     for job in parsed_data.get("work_history", []):
                         comp_name_lower = str(job.get("company", "")).lower()
                         matched_shifts = None

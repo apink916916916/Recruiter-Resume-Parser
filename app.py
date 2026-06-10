@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Strict Structural Release)
+Healthcare Resume Parser & Candidate Profile Generator (Timeline Fixed Release)
 =============================================================================
 """
 import streamlit as st
@@ -57,7 +57,7 @@ if not st.session_state["authenticated"]:
 # 3. GLOBAL CONFIGURATIONS & THE BLUEPRINT TEMPLATE
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
-CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "ARRT(MR)", "ARRT(R)", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
+CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "ARRT(R)", "ARRT(MR)", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
 EMR_LIST = ["Epic", "Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
@@ -74,20 +74,21 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
-# FIXED CORE SYSTEM PROMPT: Enforces structural extraction and eliminates generation conflicts
+# REBUILT METHOD: Hardened timeline tracking instructions to explicitly prevent ghost gaps
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL DIRECTIONS:
 1. Output MUST be purely a single valid JSON object matching the requested schema. Do not write any conversational text before or after the JSON payload.
 2. NEVER use unescaped double quotes inside text parameters. If mentioning a system or unit, use single quotes (e.g., 'ICU' or 'Epic').
 3. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
-4. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
+4. LOCATION IS MANDATORY: For every single entry in 'work_history' (excluding gaps), you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
 5. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
-6. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
-7. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
-8. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
-   - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
-   - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
+6. HARDENED TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026.
+   - Clinicians frequently hold overlapping or concurrent positions (e.g., working a full-time position and a PRN position simultaneously). You must evaluate all positions collectively as a combined unified timeline mesh.
+   - If a gap of more than 30 consecutive days is detected WHERE THE CANDIDATE HAD ZERO TOTAL EMPLOYMENT across any roles, you MUST insert a placeholder gap object.
+   - CRITICAL PREVENTATIVE RULES: Never generate a gap entry if the candidate was actively working at any facility during that timeframe. NEVER generate a ghost gap with inverted dates where the start date occurs after the end date (e.g., October 2022 - September 2022). If positions overlap, ignore any ghost gaps between them.
+   - For any valid gap placeholder object, use these exact parameters: {"title": "Employment Gap / Personal Time", "company": "N/A", "facility_city": "N/A", "facility_state": "N/A", "dates": "MM/YYYY - MM/YYYY", "start_date_structured": "", "specialty": "N/A", "charting_system": "N/A", "prn_shifts_per_month": "N/A", "duties": ["Timeline gap accounted for."]}
+7. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities. Do not list procedural equipment tasks verbatim.
 
 Your output must match this structural schema exactly:
 {
@@ -97,7 +98,7 @@ Your output must match this structural schema exactly:
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
   "work_history": [
-    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "start_date_structured": "", "specialty": "", "charting_system": "", "prn_shifts_per_month": "Full-Time", "duties": []}
+    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "start_date_structured": "", "specialty": "", "charting_system": "", "prn_shifts_per_month": "", "duties": []}
   ]
 }"""
 
@@ -217,22 +218,28 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     for job in data.get("work_history", []):
         pdf.set_font("Helvetica", "B", 10)
         
-        metrics = job.get("enriched_metrics")
-        if metrics and metrics.get("city") and metrics.get("state"):
-            geo_string = f"{metrics['city']}, {metrics['state']}"
-        else:
-            city_val = str(job.get("facility_city", "")).strip()
-            state_val = str(job.get("facility_state", "")).strip()
-            if city_val and state_val and city_val != "N/A" and state_val != "N/A":
-                geo_string = f"{city_val}, {state_val}"
-            elif state_val and state_val != "N/A":
-                geo_string = state_val
-            else:
-                geo_string = ""
-
         job_title = str(job.get('title', 'N/A'))
+        is_gap_entry = "gap" in job_title.lower() or job.get("company") == "N/A"
+        
+        # UPDATED GEOGRAPHY HANDLING: Mute location tags entirely during timeline audit gap prints
+        if is_gap_entry:
+            geo_string = ""
+        else:
+            metrics = job.get("enriched_metrics")
+            if metrics and metrics.get("city") and metrics.get("state"):
+                geo_string = f"{metrics['city']}, {metrics['state']}"
+            else:
+                city_val = str(job.get("facility_city", "")).strip()
+                state_val = str(job.get("facility_state", "")).strip()
+                if city_val and state_val and city_val != "N/A" and state_val != "N/A":
+                    geo_string = f"{city_val}, {state_val}"
+                elif state_val and state_val != "N/A" and state_val != "US":
+                    geo_string = state_val
+                else:
+                    geo_string = ""
+
         specialty_val = str(job.get('specialty', '')).strip()
-        if specialty_val and specialty_val.lower() != "not specified":
+        if specialty_val and specialty_val.lower() != "not specified" and not is_gap_entry:
             if specialty_val.lower() not in job_title.lower():
                 job_title = f"{job_title} ({specialty_val})"
 
@@ -248,15 +255,16 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         
         ribbon_parts = [f"Dates: {job.get('dates', 'N/A')}"]
         
+        # UPDATED VERBIAGE NODE: Changed label terminology from "Volume:" to "Employment Type:"
         prn_vol = job.get("prn_shifts_per_month", "Full-Time")
-        if prn_vol and prn_vol != "Full-Time":
-            ribbon_parts.append(f"Volume: {prn_vol}")
+        if prn_vol and prn_vol != "Full-Time" and prn_vol != "N/A":
+            ribbon_parts.append(f"Employment Type: {prn_vol}")
             
         charting_val = job.get("charting_system", "")
-        if charting_val and charting_val.lower() != "not specified":
+        if charting_val and charting_val.lower() != "not specified" and charting_val != "N/A":
             ribbon_parts.append(f"EMR: {charting_val}")
         
-        if metrics:
+        if not is_gap_entry and metrics:
             is_trauma = any(lvl in str(metrics.get("trauma", "")).upper() for lvl in ["LEVEL I", "LEVEL II", "LEVEL III", "LEVEL IV"])
             is_magnet = metrics.get("magnet") == "Yes"
             is_teaching = "Teaching" in metrics.get("teaching", "") and "Non-Teaching" not in metrics.get("teaching", "")
@@ -370,7 +378,6 @@ if st.session_state["parsed_payload"] is None:
                 
                 raw_content = message.content[0].text.strip()
                 
-                # Anchor search slicing
                 start_idx = raw_content.find("{")
                 end_idx = raw_content.rfind("}")
                 
@@ -386,10 +393,9 @@ if st.session_state["parsed_payload"] is None:
                     st.stop()
                 
                 if parsed_data:
-                    # PREVENTATIVE SECURITY NODE: Confirm work history array holds valid nodes before shifting viewports
                     history_nodes = parsed_data.get("work_history", [])
                     if not history_nodes or len(history_nodes) == 0:
-                        st.error("⚠️ Parser Warning: No chronological work records could be detected in this document text. Please verify the source file text content.")
+                        st.error("⚠️ Parser Warning: No chronological work records could be detected in this document text.")
                         st.stop()
                         
                     parsed_data["work_history"] = enrich_work_history(history_nodes)
@@ -479,7 +485,7 @@ else:
             with col_shifts:
                 existing_shifts = job.get("prn_shifts_per_month", "Full-Time")
                 shifts_selection = st.text_input(
-                    f"PRN Shifts/Mo (If Per Diem):",
+                    f"Employment Type / PRN Shifts:",
                     value=existing_shifts,
                     key=f"shifts_widget_{i}"
                 )

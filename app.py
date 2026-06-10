@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Checklist Scribe Engine)
+Healthcare Resume Parser & Candidate Profile Generator (Full Credentials Restore)
 =============================================================================
 """
 import streamlit as st
@@ -59,7 +59,6 @@ CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Ad
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
 EMR_LIST = ["Epic", "Oracle Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
-# The Exact Standardized Checklist Matrix
 EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- __ years of RN Experience\n"
     "- __ Years of (insert specialty) Experience\n"
@@ -323,7 +322,6 @@ if st.session_state["parsed_payload"] is None:
         st.subheader("1. Source Document & Executive Checklist Scribe")
         uploaded_file = st.file_uploader("Upload candidate resume (PDF or TXT):", type=["txt", "pdf"])
         
-        # PREloaded checklist configuration node
         manual_highlights = st.text_area(
             "Candidate Highlights Template (Edit directly or let the parser fill remaining blanks):",
             value=EXECUTIVE_CHECKLIST_TEMPLATE,
@@ -333,7 +331,23 @@ if st.session_state["parsed_payload"] is None:
     with col2:
         st.subheader("2. Initial Standardized Override Credentials")
         selected_states = st.multiselect("Manually Add Active State Licenses / Compacts:", options=STATES_LIST)
+        
+        # RESTORED: Renders Modality dropdown and Expiration text fields for selected licenses
+        if selected_states:
+            for state in selected_states:
+                c_mod, c_exp = st.columns([1, 1])
+                with c_mod: 
+                    st.selectbox(f"Modality ({state}):", options=MODALITIES, key=f"initial_mod_{state}")
+                with c_exp: 
+                    st.text_input(f"Expiration Date ({state}):", placeholder="MM/YYYY", key=f"initial_exp_{state}")
+                st.markdown("---")
+
         selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
+        
+        # RESTORED: Renders Expiration text fields for selected certificates
+        if selected_certs:
+            for cert in selected_certs:
+                st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"initial_cert_exp_{cert}")
 
     if st.button("Parse & Extract Resume Data", type="primary"):
         if not uploaded_file:
@@ -346,7 +360,7 @@ if st.session_state["parsed_payload"] is None:
                 else:
                     resume_text = uploaded_file.read().decode("utf-8")
                 
-                # Forward both the resume and the exact state of the checklist area box to Claude
+                # Forward everything over to Claude
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
@@ -371,10 +385,31 @@ if st.session_state["parsed_payload"] is None:
                         reverse=True
                     )
                     
+                    # SAFE RETRIEVAL: Pull the populated drop-down form states before changing the viewport
+                    final_compiled_licenses = []
+                    if selected_states:
+                        for state in selected_states:
+                            state_modality = st.session_state.get(f"initial_mod_{state}", "RN")
+                            state_expiration = st.session_state.get(f"initial_exp_{state}", "").strip()
+                            final_compiled_licenses.append({
+                                "state": state,
+                                "modality": state_modality,
+                                "exp_date": state_expiration if state_expiration else "Active"
+                            })
+
+                    final_compiled_certs = []
+                    if selected_certs:
+                        for cert in selected_certs:
+                            cert_expiration = st.session_state.get(f"initial_cert_exp_{cert}", "").strip()
+                            final_compiled_certs.append({
+                                "name": cert,
+                                "exp_date": cert_expiration if cert_expiration else "Active"
+                            })
+                    
                     st.session_state["parsed_payload"] = parsed_data
                     st.session_state["active_highlights_draft"] = "\n".join(parsed_data.get("suggested_highlights", []))
-                    st.session_state["manual_states"] = selected_states
-                    st.session_state["manual_certs"] = selected_certs
+                    st.session_state["manual_states_compiled"] = final_compiled_licenses
+                    st.session_state["manual_certs_compiled"] = final_compiled_certs
                     st.rerun()
 
 else:
@@ -452,24 +487,9 @@ else:
     if st.button("Compile & Download Enriched Profile (PDF)", type="primary"):
         with st.spinner("Stitching final presentation layers onto document canvas..."):
             
-            final_states = st.session_state["manual_states"]
-            final_certs = st.session_state["manual_certs"]
-            
-            compiled_licenses = []
-            if final_states:
-                for state in final_states:
-                    compiled_licenses.append({
-                        "state": state,
-                        "modality": "RN",
-                        "exp_date": "Active"
-                    })
-            compiled_certs = []
-            if final_certs:
-                for cert in final_certs:
-                    compiled_certs.append({
-                        "name": cert,
-                        "exp_date": "Active"
-                    })
+            # Fetch the parsed custom credentials directly from memory keys
+            compiled_licenses = st.session_state.get("manual_states_compiled", [])
+            compiled_certs = st.session_state.get("manual_certs_compiled", [])
                     
             final_pdf = build_pdf(
                 st.session_state["parsed_payload"], 

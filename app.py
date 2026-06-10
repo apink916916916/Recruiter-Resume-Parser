@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Streamlined Workflow v3.5)
+Healthcare Resume Parser & Candidate Profile Generator (JSON Guard v3.6)
 =============================================================================
 """
 import streamlit as st
@@ -57,7 +57,7 @@ if not st.session_state["authenticated"]:
 # 3. GLOBAL CONFIGURATIONS & THE BLUEPRINT TEMPLATE
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
-CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "ARRT (R)", "ARRT (MR)", "ARRT (CT)", "OCN", "ONC", "WCC"]
+CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "ARRT MR", "ARRT R", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT", "Radiology"]
 EMR_LIST = ["Epic", "Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
@@ -74,7 +74,6 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
-# Optimized System Instructions (Removed highlight generation for faster processing speeds)
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL INSTRUCTIONS:
@@ -82,11 +81,11 @@ CRITICAL INSTRUCTIONS:
 2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
 3. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
 4. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
-5. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points.
+5. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
 6. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
    - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
    - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
-7. Sort all history entries in reverse chronological order.
+7. Output MUST be purely a valid JSON object matching the requested schema. Do not write any conversational summary text before or after the JSON payload.
 
 Your output must be raw JSON matching this structure exactly:
 {
@@ -184,7 +183,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Standard Highlights Section (Feeds directly from page 1 input text)
+    # Standard Highlights Section (Feeds directly from page 1 text area input)
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -368,10 +367,12 @@ if st.session_state["parsed_payload"] is None:
                 )
                 
                 raw_content = message.content[0].text.strip()
-                if "```json" in raw_content:
-                    raw_content = raw_content.split("```json")[1].split("```")[0].strip()
-                elif "```" in raw_content:
-                    raw_content = raw_content.split("```")[1].split("```")[0].strip()
+                
+                # FIXED EXTRACTOR: Anchor search looks for brackets to completely ignore leading/trailing text noise
+                start_idx = raw_content.find("{")
+                end_idx = raw_content.rfind("}")
+                if start_idx != -1 and end_idx != -1:
+                    raw_content = raw_content[start_idx:end_idx+1]
                 
                 parsed_data = json.loads(raw_content)
                 
@@ -404,7 +405,7 @@ if st.session_state["parsed_payload"] is None:
                             })
                     
                     st.session_state["parsed_payload"] = parsed_data
-                    st.session_state["final_highlights"] = manual_highlights  # Locks your page 1 highlights verbatim
+                    st.session_state["final_highlights"] = manual_highlights  # Safely preserves highlights verbatim
                     st.session_state["manual_states_compiled"] = final_compiled_licenses
                     st.session_state["manual_certs_compiled"] = final_compiled_certs
                     st.rerun()
@@ -420,7 +421,6 @@ else:
         
     st.markdown("---")
     
-    # STREAMLINED VIEW: Verification step 1 is now directly the Clinical Specialty & Charting Adjustments
     st.subheader("🏥 Verification Step 1: Custom Workplace Specialty & Charting Adjustments")
     st.write("Review each separate extracted chronological work record. Assign or correct specialties and EMR charting values below:")
     
@@ -487,7 +487,7 @@ else:
                 st.session_state["parsed_payload"], 
                 compiled_licenses, 
                 compiled_certs, 
-                st.session_state["final_highlights"] # Passes page one input smoothly without second-box duplicate steps
+                st.session_state["final_highlights"]
             )
             
             st.balloons()

@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Production Release v2.6)
+Healthcare Resume Parser & Candidate Profile Generator (Interactive Workflow v3.0)
 =============================================================================
 """
 import streamlit as st
@@ -9,6 +9,7 @@ import json
 import pdfplumber
 import pandas as pd
 from thefuzz import process
+from datetime import datetime
 
 # ---------------------------------------------------------
 # 1. APP CONFIGURATION & DATA INGESTION
@@ -25,6 +26,10 @@ def load_hospital_intelligence():
         return None
 
 HOSPITAL_DB = load_hospital_intelligence()
+
+# Initialize Session Memory States for the Two-Step Workflow
+if "parsed_payload" not in st.session_state:
+    st.session_state["parsed_payload"] = None
 
 # ---------------------------------------------------------
 # 2. THE SECURITY GATEKEEPER
@@ -49,48 +54,36 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS
+# 3. CONSTANTS & SYSTEM INSTRUCTIONS (Upgraded for EMR & Specialty extraction)
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
-MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT", "LMFT", "LCSW"]
+MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
+EMR_LIST = ["Epic", "Oracle Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL INSTRUCTIONS:
-1. DO NOT extract or look for Licenses, Certifications, or Professional Summaries/Objectives. Completely ignore those sections of the resume.
+1. DO NOT extract or look for Licenses or Certifications. Completely ignore those sections of the resume.
 2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
-3. TIMELINE AUDIT (JOINT COMMISSION COMPLIANCE): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026.
-   - Calculate gaps between positions. If a gap of more than 30 days is detected, you MUST insert a placeholder entry into the 'work_history' array.
-   - BUFFER RULE: If job A ends in Month X and job B starts in Month X or X+1, do NOT count it as a gap.
-   - If a gap is valid, insert this exact object:
-     {
-       "title": "Employment Gap / Personal Time",
-       "company": "N/A",
-       "facility_city": "N/A",
-       "facility_state": "N/A",
-       "dates": "MM/YYYY - MM/YYYY",
-       "prn_shifts_per_month": "Full-Time",
-       "duties": ["Timeline gap accounted for."]
-     }
-4. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Do not extract duties or clinical task lists verbatim. Summarize and synthesize their role into exactly 3 to 4 high-level, professional bullet points. 
-   - Strip out highly specific task lists, procedures, and equipment names (e.g., skip mentioning 'EGD, colonoscopy, RotoProne beds, IV lines, charting'). 
-   - Instead, capture the macro scope: Unit focus (e.g., high-acuity MSICU), daily patient load/acuity, core accountabilities, and any leadership/charge/preceptor functions.
-5. PRN SHIFT TRACKING: For every position, look closely for text indicating shift frequency or commitments (e.g., 'worked 3 days a week', '2-4 shifts/month', 'per diem tier 3'). 
-   - If the job is PRN/Per Diem and mentions frequency, extract or calculate the estimated shifts per month and place it in the 'prn_shifts_per_month' field.
-   - If no frequency is explicitly stated but the title contains PRN or Per Diem, set the field to "PRN - Shifts Unspecified". If it's a standard full-time job, set it to "Full-Time".
-6. For the 'education' array, extract entries precisely as objects with 'degree', 'institution', 'location', and 'date' fields. Convert long degree descriptions like "Associate of Science in Nursing" or "AAS in Nursing" into standard shortcodes like "ADN" and "Bachelor of Science in Nursing" into "BSN". Convert verbal dates like "August 2008" directly into digits like "08/2008".
-7. Sort all history entries in reverse chronological order.
+3. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
+4. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
+5. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points.
+6. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
+   - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
+   - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
+7. HIGHLIGHTS GENERATOR: Based on the candidate's entire clinical history, generate an array of 3 to 4 bullet points under 'suggested_highlights' detailing their total years of experience, primary settings, and clinical strengths as a starting point for recruiters.
 
 Your output must be raw JSON matching this structure exactly:
 {
   "name": "",
   "contact_info": "",
+  "suggested_highlights": [],
   "education": [
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
   "work_history": [
-    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "prn_shifts_per_month": "", "duties": []}
+    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "start_date_structured": "", "specialty": "", "charting_system": "", "prn_shifts_per_month": "Full-Time", "duties": []}
   ]
 }"""
 
@@ -178,7 +171,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Recruiter Notes Section
+    # Recruiter Notes / Highlights Preview Section
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -223,15 +216,21 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
             else:
                 geo_string = ""
 
-        # Assemble full employer header
-        title_company = f"{job.get('title', 'N/A')} - {job.get('company', 'N/A')}"
+        # ENHANCEMENT 2: Append Specialty directly to the Title if specified
+        job_title = str(job.get('title', 'N/A'))
+        specialty_val = str(job.get('specialty', '')).strip()
+        if specialty_val and specialty_val.lower() != "not specified":
+            # Avoid duplicating strings if they wrote 'RN - ICU'
+            if specialty_val.lower() not in job_title.lower():
+                job_title = f"{job_title} ({specialty_val})"
+
+        title_company = f"{job_title} - {job.get('company', 'N/A')}"
         if geo_string:
             title_company += f" ({geo_string})"
             
         pdf.multi_cell(0, 5, pdf._clean(title_company))
         pdf.set_x(pdf.l_margin)
         
-        # Build institutional ribbon formatting
         pdf.set_font("Helvetica", "BI", 9)
         pdf.set_text_color(100, 110, 120)
         
@@ -240,12 +239,14 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         prn_vol = job.get("prn_shifts_per_month", "Full-Time")
         if prn_vol and prn_vol != "Full-Time":
             ribbon_parts.append(f"Volume: {prn_vol}")
-        
-        # STRICT FILTER NODE: Only show trauma if it explicitly matches Level I-IV designations
-        if metrics:
-            trauma_raw = str(metrics.get("trauma", "")).upper()
-            is_trauma = any(lvl in trauma_raw for lvl in ["LEVEL I", "LEVEL II", "LEVEL III", "LEVEL IV"])
             
+        # ENHANCEMENT 4: Stitch the finalized Charting System into the visible ribbon profile
+        charting_val = job.get("charting_system", "")
+        if charting_val and charting_val.lower() != "not specified":
+            ribbon_parts.append(f"EMR: {charting_val}")
+        
+        if metrics:
+            is_trauma = any(lvl in str(metrics.get("trauma", "")).upper() for lvl in ["LEVEL I", "LEVEL II", "LEVEL III", "LEVEL IV"])
             is_magnet = metrics.get("magnet") == "Yes"
             is_teaching = "Teaching" in metrics.get("teaching", "") and "Non-Teaching" not in metrics.get("teaching", "")
             
@@ -301,105 +302,51 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     return bytes(pdf.output())
 
 # ---------------------------------------------------------
-# 7. STREAMLIT INTERFACE / GRAPHICAL RUNTIME
+# 7. INTERFACE DESIGNS & WORKFLOW ENGINE
 # ---------------------------------------------------------
 st.title("🩺 Healthcare Candidate Profile Generator")
-st.write("Upload a candidate's resume to audit employment timelines, clean text artifacts, and instantly enrich facility metrics.")
 
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("1. Source Document & Notes")
-    uploaded_file = st.file_uploader("Upload candidate resume:", type=["txt", "pdf"])
+# STEP 1 VIEW: Upload & Parse Document
+if st.session_state["parsed_payload"] is None:
+    st.write("Upload a candidate's resume to parse details, cross-reference facility statuses, and unlock interactive customization fields.")
     
-    resume_raw_text = ""
-    if uploaded_file:
-        if uploaded_file.name.endswith(".pdf"):
-            with pdfplumber.open(uploaded_file) as pdf:
-                resume_raw_text = "".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-        else:
-            resume_raw_text = uploaded_file.read().decode("utf-8")
-        st.success("Resume data loaded successfully.")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.subheader("1. Source Document & Manual Highlights")
+        uploaded_file = st.file_uploader("Upload candidate resume (PDF or TXT):", type=["txt", "pdf"])
         
-    manual_highlights = st.text_area(
-        "Candidate Highlights / Recruiter Notes:",
-        placeholder="Enter key talking points or highlights (one per line)...",
-        height=150
-    )
+        manual_highlights = st.text_area(
+            "Add Extra Custom Recruiter Notes (Optional):",
+            placeholder="Enter extra specific highlights (one per line)...",
+            height=100
+        )
+        
+    with col2:
+        st.subheader("2. Initial Standardized Override Credentials")
+        selected_states = st.multiselect("Manually Add Active State Licenses / Compacts:", options=STATES_LIST)
+        selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
 
-with col2:
-    st.subheader("2. Standardized Credentials Override")
-    selected_states = st.multiselect("Manually Add Active State Licenses / Compacts:", options=STATES_LIST)
-    
-    if selected_states:
-        for state in selected_states:
-            c_mod, c_exp = st.columns([1, 1])
-            with c_mod: 
-                st.selectbox(f"Modality ({state}):", options=MODALITIES, key=f"mod_{state}")
-            with c_exp: 
-                st.text_input(f"Expiration Date ({state}):", placeholder="MM/YYYY", key=f"exp_{state}")
-            st.markdown("---")
-
-    selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
-    if selected_certs:
-        for cert in selected_certs:
-            st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"cert_exp_{cert}")
-            
-    st.markdown("---")
-    st.subheader("3. MSP Per Diem / PRN Shift Tracker")
-    st.write("If the candidate worked PRN, log the average monthly shifts uncovered during screening to stamp onto the profile:")
-    
-    prn_input_raw = st.text_area(
-        "Log PRN Volume (Format: Hospital Name: Shifts/Month)",
-        placeholder="Example:\nMarian Regional: 6 shifts/mo\nOsceola Regional: 4 shifts/mo",
-        height=100
-    )
-    
-    manual_prn_tracker = {}
-    if prn_input_raw.strip():
-        for line in prn_input_raw.split("\n"):
-            if ":" in line:
-                hosp, shifts = line.split(":", 1)
-                manual_prn_tracker[hosp.strip().lower()] = shifts.strip()
-
-# Execution Trigger
-if st.button("Generate Stitched Compliance Profile", type="primary"):
-    if not resume_raw_text:
-        st.error("Action Blocked: Please upload a resume file to initialize the parser engine.")
-    else:
-        with st.spinner("Analyzing timelines and indexing institutional intelligence..."):
-            try:
-                final_compiled_licenses = []
-                if selected_states:
-                    for state in selected_states:
-                        state_modality = st.session_state.get(f"mod_{state}", "RN")
-                        state_expiration = st.session_state.get(f"exp_{state}", "").strip()
-                        final_compiled_licenses.append({
-                            "state": state,
-                            "modality": state_modality,
-                            "exp_date": state_expiration if state_expiration else "Not Specified"
-                        })
-
-                final_compiled_certs = []
-                if selected_certs:
-                    for cert in selected_certs:
-                        cert_expiration = st.session_state.get(f"cert_exp_{cert}", "").strip()
-                        final_compiled_certs.append({
-                            "name": cert,
-                            "exp_date": cert_expiration if cert_expiration else "Active"
-                        })
-
+    if st.button("Parse & Extract Resume Data", type="primary"):
+        if not uploaded_file:
+            st.error("Action Blocked: Please upload a resume file to initialize the tracking sequence.")
+        else:
+            with st.spinner("Extracting timeline records and formatting code frameworks..."):
+                if uploaded_file.name.endswith(".pdf"):
+                    with pdfplumber.open(uploaded_file) as pdf:
+                        resume_text = "".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+                else:
+                    resume_text = uploaded_file.read().decode("utf-8")
+                
+                # Fetch baseline analysis payload from Claude
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=4000,
                     system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_raw_text}"}],
+                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
                 )
                 
                 raw_content = message.content[0].text.strip()
-                
-                # REBUILT EXTRACTOR: Looks for code blocks anywhere in the string to block conversational errors
                 if "```json" in raw_content:
                     raw_content = raw_content.split("```json")[1].split("```")[0].strip()
                 elif "```" in raw_content:
@@ -408,31 +355,146 @@ if st.button("Generate Stitched Compliance Profile", type="primary"):
                 parsed_data = json.loads(raw_content)
                 
                 if parsed_data:
+                    # Run database lookups
                     parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
                     
-                    for job in parsed_data.get("work_history", []):
-                        comp_name_lower = str(job.get("company", "")).lower()
-                        matched_shifts = None
-                        for key_hosp, value_shifts in manual_prn_tracker.items():
-                            if key_hosp in comp_name_lower:
-                                matched_shifts = value_shifts
-                                break
-                        
-                        if matched_shifts:
-                            job["prn_shifts_per_month"] = matched_shifts
-                        elif "prn_shifts_per_month" not in job or not job["prn_shifts_per_month"]:
-                            job["prn_shifts_per_month"] = "Full-Time"
-                    
-                    final_pdf = build_pdf(parsed_data, final_compiled_licenses, final_compiled_certs, manual_highlights)
-                    
-                    st.balloons()
-                    st.success("Candidate Profile generated successfully with integrated hospital metrics!")
-                    
-                    st.download_button(
-                        label="📥 Download Structured Candidate Profile (PDF)",
-                        data=final_pdf,
-                        file_name=f"Enriched_Profile_{parsed_data.get('name', 'Candidate')}.pdf",
-                        mime="application/pdf"
+                    # ENHANCEMENT 1: CHRONOLOGICAL START DATE ORDER SORTING LAYER
+                    # Sorts jobs strictly by structured start date string ("YYYY-MM") descending (Newest first)
+                    parsed_data["work_history"].sort(
+                        key=lambda x: x.get("start_date_structured", "1900-01") if x.get("start_date_structured") else "1900-01", 
+                        reverse=True
                     )
-            except Exception as e:
-                st.error(f"Engine Exception Caught: {e}")
+                    
+                    # Consolidate Recruiter Notes with AI Drafted highlights for the editable preview screen
+                    ai_highlights = parsed_data.get("suggested_highlights", [])
+                    combined_notes = []
+                    if manual_highlights.strip():
+                        combined_notes.extend([line.strip() for line in manual_highlights.split("\n") if line.strip()])
+                    combined_notes.extend(ai_highlights)
+                    
+                    # Lock data structures into state memory
+                    st.session_state["parsed_payload"] = parsed_data
+                    st.session_state["active_highlights_draft"] = "\n".join(combined_notes)
+                    st.session_state["manual_states"] = selected_states
+                    st.session_state["manual_certs"] = selected_certs
+                    st.rerun()
+
+# STEP 2 VIEW: The Interactive Recruiter Presentation Screen
+else:
+    payload = st.session_state["parsed_payload"]
+    
+    st.info("🎉 Step 1 Complete: Resume data structured successfully. Refine candidate metrics below before generating the final file.")
+    
+    if st.button("⬅️ Clear & Upload New Resume"):
+        st.session_state["parsed_payload"] = None
+        st.rerun()
+        
+    st.markdown("---")
+    
+    # ENHANCEMENT 3: Candidate Highlights Preview Text Field Block
+    st.subheader("📋 Verification Step 1: Candidate Highlights Preview")
+    st.write("Review, modify, or add to the structured presentation points below. These will print exactly as bullet points in the header:")
+    edited_highlights = st.text_area("Active Document Highlights Board:", value=st.session_state["active_highlights_draft"], height=150)
+    
+    st.markdown("---")
+    st.subheader("🏥 Verification Step 2: Custom Workplace Specialty & Charting Adjustments")
+    st.write("Review each separate extracted chronological work record. Assign or correct specialties and EMR charting values below:")
+    
+    # Form loops to render interactive selectors for each independent workspace node
+    updated_history = []
+    for i, job in enumerate(payload.get("work_history", [])):
+        company_display = f"{job.get('title', 'N/A')} - {job.get('company', 'N/A')} ({job.get('dates', 'N/A')})"
+        
+        if job.get("company") == "N/A": # Skip rendering input rows for audit gaps
+            updated_history.append(job)
+            continue
+            
+        with st.expander(f"📍 WORKPLACE LAYER {i+1}: {company_display}", expanded=True):
+            col_spec, col_emr, col_shifts = st.columns([1, 1, 1])
+            
+            # ENHANCEMENT 2: Specialty Field Handler (Preloaded if AI tracked it)
+            with col_spec:
+                existing_specialty = job.get("specialty", "").strip()
+                spec_input = st.text_input(
+                    f"Assigned Specialty:", 
+                    value=existing_specialty if existing_specialty else "Not Specified",
+                    key=f"spec_widget_{i}"
+                )
+                job["specialty"] = spec_input
+                
+            # ENHANCEMENT 4: EMR Software Droplist Picker Interface 
+            with col_emr:
+                existing_emr = job.get("charting_system", "").strip()
+                # Run an index comparison search to map preloaded text to closest selector match
+                default_index = 8 # Default to "Not Specified"
+                if existing_emr:
+                    for idx, vendor in enumerate(EMR_LIST):
+                        if vendor.lower() in existing_emr.lower() or existing_emr.lower() in vendor.lower():
+                            default_index = idx
+                            break
+                
+                emr_selection = st.selectbox(
+                    f"Facility EMR System:",
+                    options=EMR_LIST,
+                    index=default_index,
+                    key=f"emr_widget_{i}"
+                )
+                job["charting_system"] = emr_selection
+                
+            with col_shifts:
+                existing_shifts = job.get("prn_shifts_per_month", "Full-Time")
+                shifts_selection = st.text_input(
+                    f"PRN Shifts/Mo (If Per Diem):",
+                    value=existing_shifts,
+                    key=f"shifts_widget_{i}"
+                )
+                job["prn_shifts_per_month"] = shifts_selection
+                
+        updated_history.append(job)
+    
+    # Re-map interactive values to payload dictionary
+    st.session_state["parsed_payload"]["work_history"] = updated_history
+    
+    st.markdown("---")
+    st.subheader("🚀 Verification Step 3: Compile Document")
+    
+    if st.button("Compile & Download Enriched Profile (PDF)", type="primary"):
+        with st.spinner("Stitching final presentation layers onto document canvas..."):
+            
+            # Pull credential parameter settings saved from memory
+            final_states = st.session_state["manual_states"]
+            final_certs = st.session_state["manual_certs"]
+            
+            # Construct secondary credential payload matrices
+            compiled_licenses = []
+            if final_states:
+                for state in final_states:
+                    compiled_licenses.append({
+                        "state": state,
+                        "modality": "RN",
+                        "exp_date": "Active"
+                    })
+            compiled_certs = []
+            if final_certs:
+                for cert in final_certs:
+                    compiled_certs.append({
+                        "name": cert,
+                        "exp_date": "Active"
+                    })
+                    
+            final_pdf = build_pdf(
+                st.session_state["parsed_payload"], 
+                compiled_licenses, 
+                compiled_certs, 
+                edited_highlights
+            )
+            
+            st.balloons()
+            st.success("Candidate Profile generated successfully!")
+            
+            st.download_button(
+                label="📥 Download Final Structured Candidate Profile (PDF)",
+                data=final_pdf,
+                file_name=f"Final_Enriched_Profile_{st.session_state['parsed_payload'].get('name', 'Candidate')}.pdf",
+                mime="application/pdf"
+            )

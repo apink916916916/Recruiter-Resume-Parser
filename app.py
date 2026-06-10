@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Full Credentials Restore)
+Healthcare Resume Parser & Candidate Profile Generator (Streamlined Workflow v3.5)
 =============================================================================
 """
 import streamlit as st
@@ -28,6 +28,8 @@ HOSPITAL_DB = load_hospital_intelligence()
 
 if "parsed_payload" not in st.session_state:
     st.session_state["parsed_payload"] = None
+if "final_highlights" not in st.session_state:
+    st.session_state["final_highlights"] = ""
 
 # ---------------------------------------------------------
 # 2. THE SECURITY GATEKEEPER
@@ -72,6 +74,7 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
+# Optimized System Instructions (Removed highlight generation for faster processing speeds)
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL INSTRUCTIONS:
@@ -83,13 +86,12 @@ CRITICAL INSTRUCTIONS:
 6. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
    - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
    - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
-7. RECRUITER CHECKLIST MERGE: The user will pass an initial checklist draft. Look at what information the recruiter has already plugged into it. Review the raw resume text to find metrics that fill any remaining blanks (like '__' or placeholder text). Return a fully populated 10-line array under 'suggested_highlights'. Maintain the exact structure of the 10 core lines.
+7. Sort all history entries in reverse chronological order.
 
 Your output must be raw JSON matching this structure exactly:
 {
   "name": "",
   "contact_info": "",
-  "suggested_highlights": [],
   "education": [
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
@@ -182,7 +184,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Recruiter Checklist Section
+    # Standard Highlights Section (Feeds directly from page 1 input text)
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -323,7 +325,7 @@ if st.session_state["parsed_payload"] is None:
         uploaded_file = st.file_uploader("Upload candidate resume (PDF or TXT):", type=["txt", "pdf"])
         
         manual_highlights = st.text_area(
-            "Candidate Highlights Template (Edit directly or let the parser fill remaining blanks):",
+            "Candidate Highlights Template (Fill this out directly to print to the top of the PDF):",
             value=EXECUTIVE_CHECKLIST_TEMPLATE,
             height=240
         )
@@ -332,7 +334,6 @@ if st.session_state["parsed_payload"] is None:
         st.subheader("2. Initial Standardized Override Credentials")
         selected_states = st.multiselect("Manually Add Active State Licenses / Compacts:", options=STATES_LIST)
         
-        # RESTORED: Renders Modality dropdown and Expiration text fields for selected licenses
         if selected_states:
             for state in selected_states:
                 c_mod, c_exp = st.columns([1, 1])
@@ -343,8 +344,6 @@ if st.session_state["parsed_payload"] is None:
                 st.markdown("---")
 
         selected_certs = st.multiselect("Manually Add Professional Certifications:", options=CERTS_LIST)
-        
-        # RESTORED: Renders Expiration text fields for selected certificates
         if selected_certs:
             for cert in selected_certs:
                 st.text_input(f"Expiration Date ({cert}):", placeholder="MM/YYYY or Active", key=f"initial_cert_exp_{cert}")
@@ -353,20 +352,19 @@ if st.session_state["parsed_payload"] is None:
         if not uploaded_file:
             st.error("Action Blocked: Please upload a resume file to initialize the tracking sequence.")
         else:
-            with st.spinner("Extracting timeline records and combining scorecard profiles..."):
+            with st.spinner("Extracting timeline records and formatting code frameworks..."):
                 if uploaded_file.name.endswith(".pdf"):
                     with pdfplumber.open(uploaded_file) as pdf:
                         resume_text = "".join([page.extract_text() for page in pdf.pages if page.extract_text()])
                 else:
                     resume_text = uploaded_file.read().decode("utf-8")
                 
-                # Forward everything over to Claude
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=4000,
                     system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": f"Recruiter Checklist State:\n{manual_highlights}\n\nResume Text:\n{resume_text}"}],
+                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
                 )
                 
                 raw_content = message.content[0].text.strip()
@@ -385,7 +383,6 @@ if st.session_state["parsed_payload"] is None:
                         reverse=True
                     )
                     
-                    # SAFE RETRIEVAL: Pull the populated drop-down form states before changing the viewport
                     final_compiled_licenses = []
                     if selected_states:
                         for state in selected_states:
@@ -407,7 +404,7 @@ if st.session_state["parsed_payload"] is None:
                             })
                     
                     st.session_state["parsed_payload"] = parsed_data
-                    st.session_state["active_highlights_draft"] = "\n".join(parsed_data.get("suggested_highlights", []))
+                    st.session_state["final_highlights"] = manual_highlights  # Locks your page 1 highlights verbatim
                     st.session_state["manual_states_compiled"] = final_compiled_licenses
                     st.session_state["manual_certs_compiled"] = final_compiled_certs
                     st.rerun()
@@ -423,12 +420,8 @@ else:
         
     st.markdown("---")
     
-    st.subheader("📋 Verification Step 1: Candidate Highlights Executive Checklist Preview")
-    st.write("Review or adjust the final populated scorecard list before printing:")
-    edited_highlights = st.text_area("Active Document Highlights Board:", value=st.session_state["active_highlights_draft"], height=240)
-    
-    st.markdown("---")
-    st.subheader("🏥 Verification Step 2: Custom Workplace Specialty & Charting Adjustments")
+    # STREAMLINED VIEW: Verification step 1 is now directly the Clinical Specialty & Charting Adjustments
+    st.subheader("🏥 Verification Step 1: Custom Workplace Specialty & Charting Adjustments")
     st.write("Review each separate extracted chronological work record. Assign or correct specialties and EMR charting values below:")
     
     updated_history = []
@@ -482,12 +475,11 @@ else:
     st.session_state["parsed_payload"]["work_history"] = updated_history
     
     st.markdown("---")
-    st.subheader("🚀 Verification Step 3: Compile Document")
+    st.subheader("🚀 Verification Step 2: Compile Document")
     
     if st.button("Compile & Download Enriched Profile (PDF)", type="primary"):
         with st.spinner("Stitching final presentation layers onto document canvas..."):
             
-            # Fetch the parsed custom credentials directly from memory keys
             compiled_licenses = st.session_state.get("manual_states_compiled", [])
             compiled_certs = st.session_state.get("manual_certs_compiled", [])
                     
@@ -495,7 +487,7 @@ else:
                 st.session_state["parsed_payload"], 
                 compiled_licenses, 
                 compiled_certs, 
-                edited_highlights
+                st.session_state["final_highlights"] # Passes page one input smoothly without second-box duplicate steps
             )
             
             st.balloons()

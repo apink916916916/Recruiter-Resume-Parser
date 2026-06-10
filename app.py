@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Production Shield v3.7)
+Healthcare Resume Parser & Candidate Profile Generator (Strict Structural Release)
 =============================================================================
 """
 import streamlit as st
@@ -57,7 +57,7 @@ if not st.session_state["authenticated"]:
 # 3. GLOBAL CONFIGURATIONS & THE BLUEPRINT TEMPLATE
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
-CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "ARRT(R)", "ARRT(MR)", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
+CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "ARRT(MR)", "ARRT(R)", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
 EMR_LIST = ["Epic", "Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
@@ -74,20 +74,18 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
+# FIXED CORE SYSTEM PROMPT: Enforces structural extraction and eliminates generation conflicts
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
-CRITICAL JSON RULES:
-- Never use unescaped double quotes inside text parameters. If mentioning a brand name or quote, use single quotes (e.g., 'Epic' or 'RotoProne').
-- Never include trailing commas at the end of lists or arrays.
-- Output MUST be purely a single valid JSON object. Do not write introductory or summary conversations.
-
-CRITICAL EXTRACTION INSTRUCTIONS:
-1. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
-2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
-3. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
-4. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
-5. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
-6. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
+CRITICAL DIRECTIONS:
+1. Output MUST be purely a single valid JSON object matching the requested schema. Do not write any conversational text before or after the JSON payload.
+2. NEVER use unescaped double quotes inside text parameters. If mentioning a system or unit, use single quotes (e.g., 'ICU' or 'Epic').
+3. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
+4. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
+5. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
+6. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
+7. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
+8. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
    - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
    - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
 
@@ -187,6 +185,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
+    # Standard Highlights Section
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -371,7 +370,7 @@ if st.session_state["parsed_payload"] is None:
                 
                 raw_content = message.content[0].text.strip()
                 
-                # PROTECTIVE SHIELD BLOCK: Isolate curly brackets defensively
+                # Anchor search slicing
                 start_idx = raw_content.find("{")
                 end_idx = raw_content.rfind("}")
                 
@@ -380,16 +379,20 @@ if st.session_state["parsed_payload"] is None:
                     try:
                         parsed_data = json.loads(clean_json_string)
                     except json.JSONDecodeError:
-                        st.error("⚠️ AI Formatting Exception: The engine returned corrupted data markers. Click the parse button once more to rerun.")
-                        st.text_area("System Diagnostic Log (Raw Output Window):", value=raw_content, height=250)
+                        st.error("⚠️ AI Formatting Exception: The engine returned corrupted formatting markers.")
                         st.stop()
                 else:
                     st.error("❌ Transmission Failure: The AI failed to respond with a structured data framework.")
-                    st.text_area("System Diagnostic Log (Raw Output Window):", value=raw_content, height=250)
                     st.stop()
                 
                 if parsed_data:
-                    parsed_data["work_history"] = enrich_work_history(parsed_data.get("work_history", []))
+                    # PREVENTATIVE SECURITY NODE: Confirm work history array holds valid nodes before shifting viewports
+                    history_nodes = parsed_data.get("work_history", [])
+                    if not history_nodes or len(history_nodes) == 0:
+                        st.error("⚠️ Parser Warning: No chronological work records could be detected in this document text. Please verify the source file text content.")
+                        st.stop()
+                        
+                    parsed_data["work_history"] = enrich_work_history(history_nodes)
                     
                     parsed_data["work_history"].sort(
                         key=lambda x: x.get("start_date_structured", "1900-01") if x.get("start_date_structured") else "1900-01", 

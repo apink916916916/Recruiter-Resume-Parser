@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Checklist Enhancement)
+Healthcare Resume Parser & Candidate Profile Generator (Checklist Scribe Engine)
 =============================================================================
 """
 import streamlit as st
@@ -52,17 +52,31 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CONSTANTS & SYSTEM INSTRUCTIONS (Upgraded with Executive Checklist)
+# 3. GLOBAL CONFIGURATIONS & THE BLUEPRINT TEMPLATE
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC"]
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
 EMR_LIST = ["Epic", "Oracle Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
+# The Exact Standardized Checklist Matrix
+EXECUTIVE_CHECKLIST_TEMPLATE = (
+    "- __ years of RN Experience\n"
+    "- __ Years of (insert specialty) Experience\n"
+    "- (Insert float units) Float Experience\n"
+    "- Travel Experience\n"
+    "- (Charge and Preceptor) Experience\n"
+    "- (insert facility type exp) Trauma Facility Experience\n"
+    "- (insert license details) License x__/__\n"
+    "- ACLS x__/__, BLS x__/__\n"
+    "- Bachelors Degree\n"
+    "- (insert types of charting exp) Computer Charting Experience"
+)
+
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL INSTRUCTIONS:
-1. DO NOT extract or look for Licenses or Certifications in separate standalone sections. Completely ignore those sections of the resume text.
+1. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
 2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
 3. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
 4. TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026. If a gap of more than 30 days is detected, you MUST insert a placeholder entry object with title "Employment Gap / Personal Time" and company "N/A".
@@ -70,19 +84,7 @@ CRITICAL INSTRUCTIONS:
 6. ADVANCED CLINICAL EXTRACTION (SPECIALTY & CHARTING):
    - For every position, attempt to isolate their clinical specialty area (e.g., ICU, ER, OR, MedSurg, Labor & Delivery). If the resume only states 'Registered Nurse' with no context, set the 'specialty' field to a blank string "".
    - Scan the resume's text or technical bullets for any mention of the EMR/charting system used at that facility (e.g., Epic, Cerner, Meditech). If discovered, place it in the 'charting_system' field. If not found, leave it as a blank string "".
-7. RECRUITER HIGHLIGHTS CHECKLIST PRESENTATION: Based on the candidate's complete clinical resume file, licenses, education, and credentials, you MUST generate an array of exactly 10 strings under the 'suggested_highlights' field matching this standardized profile checklist format. Extract the exact metrics to fill in the blanks. If data is completely missing for a specific item, leave the layout placeholders intact so recruiters can modify them manually.
-
-Format every item in the 'suggested_highlights' array exactly like these examples:
-- [Insert calculated total number] years of RN Experience
-- [Insert years] Years of [Insert primary specialty name] Experience
-- [Insert Float Units if mentioned, else '(Insert float units)'] Float Experience
-- [Specify 'Travel Experience' with details/agencies, else 'No Travel Experience Listed']
-- [Specify 'Charge' and/or 'Preceptor' if found in duties, else '(Charge and Preceptor) Experience']
-- [Specify Trauma Level found, e.g., Level II, else '(insert facility type exp)'] Trauma Facility Experience
-- [Insert State and License type, e.g., RN-CA] License x[Insert Exp Date if found, else '__/__']
-- ACLS x[Insert Exp Date if found, else '__/__'], BLS x[Insert Exp Date if found, else '__/__']
-- [Insert exact degree shortcode, e.g., Bachelors Degree / BSN / Associate Degree]
-- [Insert all extracted EMR software platforms, e.g., Epic, Cerner] Computer Charting Experience
+7. RECRUITER CHECKLIST MERGE: The user will pass an initial checklist draft. Look at what information the recruiter has already plugged into it. Review the raw resume text to find metrics that fill any remaining blanks (like '__' or placeholder text). Return a fully populated 10-line array under 'suggested_highlights'. Maintain the exact structure of the 10 core lines.
 
 Your output must be raw JSON matching this structure exactly:
 {
@@ -181,7 +183,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Recruiter Notes Checklists Presenter Layer
+    # Recruiter Checklist Section
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -318,13 +320,14 @@ if st.session_state["parsed_payload"] is None:
     
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.subheader("1. Source Document & Manual Highlights")
+        st.subheader("1. Source Document & Executive Checklist Scribe")
         uploaded_file = st.file_uploader("Upload candidate resume (PDF or TXT):", type=["txt", "pdf"])
         
+        # PREloaded checklist configuration node
         manual_highlights = st.text_area(
-            "Add Extra Custom Recruiter Notes (Optional):",
-            placeholder="Enter extra specific highlights (one per line)...",
-            height=100
+            "Candidate Highlights Template (Edit directly or let the parser fill remaining blanks):",
+            value=EXECUTIVE_CHECKLIST_TEMPLATE,
+            height=240
         )
         
     with col2:
@@ -336,19 +339,20 @@ if st.session_state["parsed_payload"] is None:
         if not uploaded_file:
             st.error("Action Blocked: Please upload a resume file to initialize the tracking sequence.")
         else:
-            with st.spinner("Extracting timeline records and formatting code frameworks..."):
+            with st.spinner("Extracting timeline records and combining scorecard profiles..."):
                 if uploaded_file.name.endswith(".pdf"):
                     with pdfplumber.open(uploaded_file) as pdf:
                         resume_text = "".join([page.extract_text() for page in pdf.pages if page.extract_text()])
                 else:
                     resume_text = uploaded_file.read().decode("utf-8")
                 
+                # Forward both the resume and the exact state of the checklist area box to Claude
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=4000,
                     system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
+                    messages=[{"role": "user", "content": f"Recruiter Checklist State:\n{manual_highlights}\n\nResume Text:\n{resume_text}"}],
                 )
                 
                 raw_content = message.content[0].text.strip()
@@ -367,15 +371,8 @@ if st.session_state["parsed_payload"] is None:
                         reverse=True
                     )
                     
-                    # EXTRACTED: Feeds Claude's checklist directly to the preview dashboard
-                    ai_highlights = parsed_data.get("suggested_highlights", [])
-                    combined_notes = []
-                    if manual_highlights.strip():
-                        combined_notes.extend([line.strip() for line in manual_highlights.split("\n") if line.strip()])
-                    combined_notes.extend(ai_highlights)
-                    
                     st.session_state["parsed_payload"] = parsed_data
-                    st.session_state["active_highlights_draft"] = "\n".join(combined_notes)
+                    st.session_state["active_highlights_draft"] = "\n".join(parsed_data.get("suggested_highlights", []))
                     st.session_state["manual_states"] = selected_states
                     st.session_state["manual_certs"] = selected_certs
                     st.rerun()
@@ -391,9 +388,8 @@ else:
         
     st.markdown("---")
     
-    # FIXED PREVIEW INTERFACE: Renders your exact 10-point scannable checklist
     st.subheader("📋 Verification Step 1: Candidate Highlights Executive Checklist Preview")
-    st.write("Review, modify, or complete the active candidate summary matrix before committing to the canvas:")
+    st.write("Review or adjust the final populated scorecard list before printing:")
     edited_highlights = st.text_area("Active Document Highlights Board:", value=st.session_state["active_highlights_draft"], height=240)
     
     st.markdown("---")

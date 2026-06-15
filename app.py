@@ -1,6 +1,6 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Imaging Credentials Update)
-=============================================================================
+Healthcare Resume Parser & Candidate Profile Generator (Deterministic Chronology Engine)
+===================================================================================
 """
 import streamlit as st
 import anthropic
@@ -9,6 +9,7 @@ import json
 import pdfplumber
 import pandas as pd
 from thefuzz import process
+from datetime import datetime
 
 # ---------------------------------------------------------
 # 1. APP CONFIGURATION & DATA INGESTION
@@ -58,11 +59,7 @@ if not st.session_state["authenticated"]:
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
 MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
-
-# UPDATED: Added ARRT (MR) and ARRT (R) to the certified tracking index
 CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC", "ARRT (MR)", "ARRT (R)"]
-
-# UPDATED: Simplified tracking verbiage to use "Cerner" instead of "Oracle Cerner"
 EMR_LIST = ["Epic", "Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
 EXECUTIVE_CHECKLIST_TEMPLATE = (
@@ -78,22 +75,20 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
+# REBUILT PROMPT: Stripped out all AI gap math to enforce strict real-world data extraction
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL DIRECTIONS:
 1. Output MUST be purely a single valid JSON object matching the requested schema. Do not write any conversational text before or after the JSON payload.
 2. NEVER use unescaped double quotes inside text parameters. If mentioning a system or unit, use single quotes (e.g., 'ICU' or 'Epic').
 3. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
-4. LOCATION IS MANDATORY: For every single entry in 'work_history' (excluding gaps), you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
+4. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
 5. STRICT TITLE EXTRACTION RULE: Extract ONLY the official raw job position title (e.g., 'MRI Technologist', 'Registered Nurse', 'Staff Nurse') into the 'title' field. Do NOT append or include employment types, shifts, or statuses like 'Part-Time', 'Full-Time', or 'PRN' within the title text string itself.
-6. STRICT DATA INTEGRITY RULE: Never assume, infer, or invent any workplaces, facilities, or history entries not explicitly listed in the plain text.
-7. TIMELINE SORT AUDIT: For every job, extract the exact start date and convert it into a standard hidden sortable string format "YYYY-MM" inside the 'start_date_structured' field. If they started in August 2022, output '2022-08'.
-8. HARDENED TIMELINE AUDIT (GAPS): Audit the candidate's work history timeline over the past 7 years (back to 2019). The current date is May 14, 2026.
-   - Evaluate all positions collectively as a combined unified timeline mesh to account for concurrent or overlapping roles.
-   - If a gap of more than 30 consecutive days is detected WHERE THE CANDIDATE HAD ZERO TOTAL EMPLOYMENT across any roles, you MUST insert a placeholder gap object.
-   - Never generate a gap entry if the candidate was actively working at any facility during that timeframe. NEVER generate a ghost gap with inverted dates where the start date occurs after the end date.
-   - For any valid gap placeholder object, use these exact parameters: {"title": "Employment Gap / Personal Time", "company": "N/A", "facility_city": "N/A", "facility_state": "N/A", "dates": "MM/YYYY - MM/YYYY", "start_date_structured": "", "specialty": "N/A", "charting_system": "N/A", "prn_shifts_per_month": "N/A", "duties": ["Timeline gap accounted for."]}
-9. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
+6. NO AI GAP GENERATION: Do not attempt to compute, calculate, or insert any employment gaps or 'N/A' placeholder rows into the 'work_history' array. Extract ONLY the actual, real positions explicitly listed on the candidate's resume.
+7. STRUCTURED DATE EXTRACTION: Convert the position start and end dates into a standard hidden sortable string format "YYYY-MM". 
+   - If they started in August 2022, set 'start_date_structured' to '2022-08'.
+   - If they are currently working there, set 'end_date_structured' to 'Present'. Otherwise, convert the end date to 'YYYY-MM' (e.g., '2025-11').
+8. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
 
 Your output must match this structural schema exactly:
 {
@@ -103,13 +98,91 @@ Your output must match this structural schema exactly:
     {"degree": "", "institution": "", "location": "", "date": ""}
   ],
   "work_history": [
-    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "start_date_structured": "", "specialty": "", "charting_system": "", "prn_shifts_per_month": "", "duties": []}
+    {"title": "", "company": "", "facility_city": "", "facility_state": "", "dates": "", "start_date_structured": "", "end_date_structured": "", "specialty": "", "charting_system": "", "prn_shifts_per_month": "", "duties": []}
   ]
 }"""
 
 # ---------------------------------------------------------
-# 4. CUSTOM DATABASE ENRICHMENT ENGINE
+# 4. PYTHON CHRONOLOGY MATRIX (Deterministic Gap Calculator)
 # ---------------------------------------------------------
+def calculate_deterministic_gaps(work_history_list):
+    """Computes mathematically precise chronological gaps using exact datetimes to eliminate ghost entries."""
+    # Isolate real extracted jobs, discarding any corrupted nodes
+    jobs = [j for j in work_history_list if isinstance(j, dict) and j.get("company") != "N/A"]
+    if not jobs:
+        return work_history_list
+        
+    parsed_timeline = []
+    current_runtime_date = datetime(2026, 5, 14) # Standard compliance baseline anchor
+    
+    for j in jobs:
+        start_str = str(j.get("start_date_structured", "")).strip()
+        end_str = str(j.get("end_date_structured", "")).strip()
+        
+        try:
+            start_dt = datetime.strptime(start_str, "%Y-%m")
+        except:
+            start_dt = datetime(1900, 1, 1)
+            
+        if not end_str or "present" in end_str.lower() or "current" in end_str.lower():
+            end_dt = current_runtime_date
+        else:
+            try:
+                end_dt = datetime.strptime(end_str, "%Y-%m")
+            except:
+                end_dt = start_dt
+                
+        if end_dt < start_dt:
+            end_dt = start_dt
+                
+        parsed_timeline.append({
+            "job": j,
+            "start": start_dt,
+            "end": end_dt
+        })
+        
+    # Sort the tracking mesh ascending (Oldest to Newest) to map continuous calendar coverage
+    parsed_timeline.sort(key=lambda x: x["start"])
+    
+    gaps = []
+    if parsed_timeline:
+        max_end_seen = parsed_timeline[0]["end"]
+        
+        for i in range(1, len(parsed_timeline)):
+            next_start = parsed_timeline[i]["start"]
+            
+            # Check for true calendar space exceeding 30 days where zero employment overlap occurred
+            if next_start > max_end_seen and (next_start - max_end_seen).days > 30:
+                gap_start_display = max_end_seen.strftime("%m/%Y")
+                gap_end_display = next_start.strftime("%m/%Y")
+                
+                gap_node = {
+                    "title": "Employment Gap / Personal Time",
+                    "company": "N/A",
+                    "facility_city": "N/A",
+                    "facility_state": "N/A",
+                    "dates": f"{gap_start_display} - {gap_end_display}",
+                    "start_date_structured": max_end_seen.strftime("%Y-%m"),
+                    "end_date_structured": next_start.strftime("%Y-%m"),
+                    "specialty": "N/A",
+                    "charting_system": "N/A",
+                    "prn_shifts_per_month": "N/A",
+                    "duties": ["Timeline gap accounted for."]
+                }
+                gaps.append(gap_node)
+                
+            if parsed_timeline[i]["end"] > max_end_seen:
+                max_end_seen = parsed_timeline[i]["end"]
+                
+    # Unify real jobs with verified programmatic gaps and sort descending (Newest First)
+    combined_history = jobs + gaps
+    combined_history.sort(
+        key=lambda x: x.get("start_date_structured", "1900-01") if x.get("start_date_structured") else "1900-01", 
+        reverse=True
+    )
+    return combined_history
+
+
 def enrich_work_history(work_history_list):
     """Intercepts extracted history and matches it against your master parquet database."""
     if HOSPITAL_DB is None:
@@ -191,7 +264,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Standard Highlights Section
+    # Highlights Checklist Canvas Node
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -226,6 +299,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         job_title = str(job.get('title', 'N/A'))
         is_gap_entry = "gap" in job_title.lower() or job.get("company") == "N/A"
         
+        # Safe Geo Clipping: Stops (US, US) from generating during gap prints
         if is_gap_entry:
             geo_string = ""
         else:
@@ -401,12 +475,11 @@ if st.session_state["parsed_payload"] is None:
                         st.error("⚠️ Parser Warning: No chronological work records could be detected in this document text.")
                         st.stop()
                         
-                    parsed_data["work_history"] = enrich_work_history(history_nodes)
+                    # Master Database Enrichment Lookups
+                    enriched_nodes = enrich_work_history(history_nodes)
                     
-                    parsed_data["work_history"].sort(
-                        key=lambda x: x.get("start_date_structured", "1900-01") if x.get("start_date_structured") else "1900-01", 
-                        reverse=True
-                    )
+                    # RUN PROGRAMMATIC CONTINUOUS COVERAGE ENGINE: Maps mathematically precise sequential gaps
+                    parsed_data["work_history"] = calculate_deterministic_gaps(enriched_nodes)
                     
                     final_compiled_licenses = []
                     if selected_states:

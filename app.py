@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Deterministic Chronology Engine)
+Healthcare Resume Parser & Candidate Profile Generator (API Exception Shield v3.9)
 ===================================================================================
 """
 import streamlit as st
@@ -75,7 +75,6 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
-# REBUILT PROMPT: Stripped out all AI gap math to enforce strict real-world data extraction
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL DIRECTIONS:
@@ -107,13 +106,12 @@ Your output must match this structural schema exactly:
 # ---------------------------------------------------------
 def calculate_deterministic_gaps(work_history_list):
     """Computes mathematically precise chronological gaps using exact datetimes to eliminate ghost entries."""
-    # Isolate real extracted jobs, discarding any corrupted nodes
     jobs = [j for j in work_history_list if isinstance(j, dict) and j.get("company") != "N/A"]
     if not jobs:
         return work_history_list
         
     parsed_timeline = []
-    current_runtime_date = datetime(2026, 5, 14) # Standard compliance baseline anchor
+    current_runtime_date = datetime(2026, 5, 14)
     
     for j in jobs:
         start_str = str(j.get("start_date_structured", "")).strip()
@@ -141,7 +139,6 @@ def calculate_deterministic_gaps(work_history_list):
             "end": end_dt
         })
         
-    # Sort the tracking mesh ascending (Oldest to Newest) to map continuous calendar coverage
     parsed_timeline.sort(key=lambda x: x["start"])
     
     gaps = []
@@ -151,7 +148,6 @@ def calculate_deterministic_gaps(work_history_list):
         for i in range(1, len(parsed_timeline)):
             next_start = parsed_timeline[i]["start"]
             
-            # Check for true calendar space exceeding 30 days where zero employment overlap occurred
             if next_start > max_end_seen and (next_start - max_end_seen).days > 30:
                 gap_start_display = max_end_seen.strftime("%m/%Y")
                 gap_end_display = next_start.strftime("%m/%Y")
@@ -174,7 +170,6 @@ def calculate_deterministic_gaps(work_history_list):
             if parsed_timeline[i]["end"] > max_end_seen:
                 max_end_seen = parsed_timeline[i]["end"]
                 
-    # Unify real jobs with verified programmatic gaps and sort descending (Newest First)
     combined_history = jobs + gaps
     combined_history.sort(
         key=lambda x: x.get("start_date_structured", "1900-01") if x.get("start_date_structured") else "1900-01", 
@@ -264,7 +259,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
-    # Highlights Checklist Canvas Node
+    # Standard Highlights Section
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -299,7 +294,6 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
         job_title = str(job.get('title', 'N/A'))
         is_gap_entry = "gap" in job_title.lower() or job.get("company") == "N/A"
         
-        # Safe Geo Clipping: Stops (US, US) from generating during gap prints
         if is_gap_entry:
             geo_string = ""
         else:
@@ -446,14 +440,25 @@ if st.session_state["parsed_payload"] is None:
                     resume_text = uploaded_file.read().decode("utf-8")
                 
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-                message = client.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=4000,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
-                )
                 
-                raw_content = message.content[0].text.strip()
+                # ENHANCED SHIELD BLOCK: Intercept and guard against API-level server crashes
+                try:
+                    message = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=4000,
+                        system=SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
+                    )
+                    raw_content = message.content[0].text.strip()
+                except anthropic.InternalServerError:
+                    st.error("⚠️ Anthropic Server Error (500): Anthropic's processing servers are currently overloaded or glitching. Please click the primary 'Parse & Extract Resume Data' execution button once more to retry.")
+                    st.stop()
+                except anthropic.APIConnectionError:
+                    st.error("⚠️ API Connection Failure: A network timeout occurred while talking to the text models. Please retry in a few seconds.")
+                    st.stop()
+                except Exception as e:
+                    st.error(f"⚠️ Unexpected Network Handoff Exception: {e}")
+                    st.stop()
                 
                 start_idx = raw_content.find("{")
                 end_idx = raw_content.rfind("}")
@@ -463,7 +468,7 @@ if st.session_state["parsed_payload"] is None:
                     try:
                         parsed_data = json.loads(clean_json_string)
                     except json.JSONDecodeError:
-                        st.error("⚠️ AI Formatting Exception: The engine returned corrupted formatting markers.")
+                        st.error("⚠️ AI Formatting Exception: The engine returned corrupted data arrays. Please click the parse button again to generate a clean pass.")
                         st.stop()
                 else:
                     st.error("❌ Transmission Failure: The AI failed to respond with a structured data framework.")
@@ -475,10 +480,7 @@ if st.session_state["parsed_payload"] is None:
                         st.error("⚠️ Parser Warning: No chronological work records could be detected in this document text.")
                         st.stop()
                         
-                    # Master Database Enrichment Lookups
                     enriched_nodes = enrich_work_history(history_nodes)
-                    
-                    # RUN PROGRAMMATIC CONTINUOUS COVERAGE ENGINE: Maps mathematically precise sequential gaps
                     parsed_data["work_history"] = calculate_deterministic_gaps(enriched_nodes)
                     
                     final_compiled_licenses = []

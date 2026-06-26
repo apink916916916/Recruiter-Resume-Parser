@@ -1,6 +1,6 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (API Exception Shield v3.9)
-===================================================================================
+Healthcare Resume Parser & Candidate Profile Generator (Self-Healing JSON v4.0)
+=============================================================================
 """
 import streamlit as st
 import anthropic
@@ -10,6 +10,7 @@ import pdfplumber
 import pandas as pd
 from thefuzz import process
 from datetime import datetime
+import re
 
 # ---------------------------------------------------------
 # 1. APP CONFIGURATION & DATA INGESTION
@@ -77,17 +78,20 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
 
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
-CRITICAL DIRECTIONS:
-1. Output MUST be purely a single valid JSON object matching the requested schema. Do not write any conversational text before or after the JSON payload.
-2. NEVER use unescaped double quotes inside text parameters. If mentioning a system or unit, use single quotes (e.g., 'ICU' or 'Epic').
-3. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
-4. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
-5. STRICT TITLE EXTRACTION RULE: Extract ONLY the official raw job position title (e.g., 'MRI Technologist', 'Registered Nurse', 'Staff Nurse') into the 'title' field. Do NOT append or include employment types, shifts, or statuses like 'Part-Time', 'Full-Time', or 'PRN' within the title text string itself.
-6. NO AI GAP GENERATION: Do not attempt to compute, calculate, or insert any employment gaps or 'N/A' placeholder rows into the 'work_history' array. Extract ONLY the actual, real positions explicitly listed on the candidate's resume.
-7. STRUCTURED DATE EXTRACTION: Convert the position start and end dates into a standard hidden sortable string format "YYYY-MM". 
+CRITICAL JSON SANITIZATION RULES:
+- Never use unescaped double quotes inside text strings. Always map clinical quotes or software settings using single quotes (e.g., 'ICU' or 'Epic').
+- Never leave dangling commas at the end of lists or object keys.
+- Output MUST be strictly a single raw JSON block. Do not wrap code blocks or write notes.
+
+CRITICAL EXTRACTION INSTRUCTIONS:
+1. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
+2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
+3. STRICT TITLE EXTRACTION RULE: Extract ONLY the official raw job position title (e.g., 'MRI Technologist', 'Registered Nurse', 'Staff Nurse') into the 'title' field. Do NOT append or include employment types, shifts, or statuses like 'Part-Time', 'Full-Time', or 'PRN' within the title text string itself.
+4. NO AI GAP GENERATION: Do not attempt to compute, calculate, or insert any employment gaps or 'N/A' placeholder rows into the 'work_history' array. Extract ONLY the actual, real positions explicitly listed on the candidate's resume.
+5. STRUCTURED DATE EXTRACTION: Convert the position start and end dates into a standard hidden sortable string format "YYYY-MM". 
    - If they started in August 2022, set 'start_date_structured' to '2022-08'.
    - If they are currently working there, set 'end_date_structured' to 'Present'. Otherwise, convert the end date to 'YYYY-MM' (e.g., '2025-11').
-8. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
+6. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
 
 Your output must match this structural schema exactly:
 {
@@ -441,7 +445,6 @@ if st.session_state["parsed_payload"] is None:
                 
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 
-                # ENHANCED SHIELD BLOCK: Intercept and guard against API-level server crashes
                 try:
                     message = client.messages.create(
                         model="claude-sonnet-4-6",
@@ -451,10 +454,7 @@ if st.session_state["parsed_payload"] is None:
                     )
                     raw_content = message.content[0].text.strip()
                 except anthropic.InternalServerError:
-                    st.error("⚠️ Anthropic Server Error (500): Anthropic's processing servers are currently overloaded or glitching. Please click the primary 'Parse & Extract Resume Data' execution button once more to retry.")
-                    st.stop()
-                except anthropic.APIConnectionError:
-                    st.error("⚠️ API Connection Failure: A network timeout occurred while talking to the text models. Please retry in a few seconds.")
+                    st.error("⚠️ Anthropic Server Error (500): Anthropic's processing servers are currently overloaded. Please click the primary execution button once more to retry.")
                     st.stop()
                 except Exception as e:
                     st.error(f"⚠️ Unexpected Network Handoff Exception: {e}")
@@ -465,10 +465,15 @@ if st.session_state["parsed_payload"] is None:
                 
                 if start_idx != -1 and end_idx != -1:
                     clean_json_string = raw_content[start_idx:end_idx+1]
+                    
+                    # ENHANCED ENCRYPTED REPAIR MATRIX: Automatically sanitizes trailing array commas
+                    clean_json_string = re.sub(r',\s*([\]}])', r'\1', clean_json_string)
+                    
                     try:
                         parsed_data = json.loads(clean_json_string)
                     except json.JSONDecodeError:
                         st.error("⚠️ AI Formatting Exception: The engine returned corrupted data arrays. Please click the parse button again to generate a clean pass.")
+                        st.text_area("System Diagnostic Log (Raw Output Window):", value=raw_content, height=250)
                         st.stop()
                 else:
                     st.error("❌ Transmission Failure: The AI failed to respond with a structured data framework.")
@@ -597,4 +602,4 @@ else:
                 data=final_pdf,
                 file_name=f"Final_Enriched_Profile_{st.session_state['parsed_payload'].get('name', 'Candidate')}.pdf",
                 mime="application/pdf"
-            )
+            )FF

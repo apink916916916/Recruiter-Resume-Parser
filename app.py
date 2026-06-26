@@ -602,4 +602,4 @@ else:
                 data=final_pdf,
                 file_name=f"Final_Enriched_Profile_{st.session_state['parsed_payload'].get('name', 'Candidate')}.pdf",
                 mime="application/pdf"
-            )FF
+            )

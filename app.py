@@ -1,5 +1,5 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Rollback Slicer Framework v4.2)
+Healthcare Resume Parser & Candidate Profile Generator (Deep 7-Year History Framework v4.3)
 ===================================================================================
 """
 import streamlit as st
@@ -76,6 +76,7 @@ EXECUTIVE_CHECKLIST_TEMPLATE = (
     "- (insert types of charting exp) Computer Charting Experience"
 )
 
+# UPGRADED SYSTEM PROMPT: Enforces a strict 7-year lookback mandate
 SYSTEM_PROMPT = """You are an expert healthcare recruitment assistant. Your job is to extract data from a medical resume and format it into a highly structured JSON object.
 
 CRITICAL JSON SANITIZATION RULES:
@@ -84,14 +85,15 @@ CRITICAL JSON SANITIZATION RULES:
 - Output MUST be strictly a single raw JSON block. Do not wrap code blocks or write notes.
 
 CRITICAL EXTRACTION INSTRUCTIONS:
-1. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
-2. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
-3. STRICT TITLE EXTRACTION RULE: Extract ONLY the official raw job position title (e.g., 'MRI Technologist', 'Registered Nurse', 'Staff Nurse') into the 'title' field. Do NOT append or include employment types, shifts, or statuses like 'Part-Time', 'Full-Time', or 'PRN' within the title text string itself.
-4. NO AI GAP GENERATION: Do not attempt to compute, calculate, or insert any employment gaps or 'N/A' placeholder rows into the 'work_history' array. Extract ONLY the actual, real positions explicitly listed on the candidate's resume.
-5. STRUCTURED DATE EXTRACTION: Convert the position start and end dates into a standard hidden sortable string format "YYYY-MM". 
+1. STRICT 7-YEAR LOOKBACK MANDATE: You MUST extract every single professional position listed on the resume stretching back at least 7 years (to 2019) if present. Do not truncate the work history list early, do not skip older roles, and do not condense separate travel assignments into single items.
+2. DO NOT extract or look for Licenses or Certifications in standalone sections. Completely ignore those blocks.
+3. LOCATION IS MANDATORY: For every single entry in 'work_history', you MUST extract the City and the 2-letter State code where that hospital is located and put them in 'facility_city' and 'facility_state'. If you cannot find them, default to "US".
+4. STRICT TITLE EXTRACTION RULE: Extract ONLY the official raw job position title (e.g., 'MRI Technologist', 'Registered Nurse', 'Staff Nurse') into the 'title' field. Do NOT append or include employment types, shifts, or statuses like 'Part-Time', 'Full-Time', or 'PRN' within the title text string itself.
+5. NO AI GAP GENERATION: Do not attempt to compute, calculate, or insert any employment gaps or 'N/A' placeholder rows into the 'work_history' array. Extract ONLY the actual, real positions explicitly listed on the candidate's resume.
+6. STRUCTURED DATE EXTRACTION: Convert the position start and end dates into a standard hidden sortable string format "YYYY-MM". 
    - If they started in August 2022, set 'start_date_structured' to '2022-08'.
    - If they are currently working there, set 'end_date_structured' to 'Present'. Otherwise, convert the end date to 'YYYY-MM' (e.g., '2025-11').
-6. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
+7. EXECUTIVE SUMMARY OF DUTIES (ELIMINATE FLUFF): Summarize their role into exactly 3 to 4 high-level, professional macro bullet points focusing on unit scope and accountabilities.
 
 Your output must match this structural schema exactly:
 {
@@ -108,8 +110,36 @@ Your output must match this structural schema exactly:
 # ---------------------------------------------------------
 # 4. PYTHON CHRONOLOGY MATRIX (Deterministic Gap Calculator)
 # ---------------------------------------------------------
+def clean_and_balance_json(json_str):
+    """Programmatically completes unclosed JSON objects caused by text stream truncation."""
+    json_str = json_str.strip()
+    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+    
+    if json_str.endswith(','):
+        json_str = json_str[:-1]
+        
+    if json_str.count('"') % 2 != 0:
+        json_str += '"'
+        
+    open_brackets = json_str.count("[")
+    close_brackets = json_str.count("]")
+    open_braces = json_str.count("{")
+    close_braces = json_str.count("}")
+    
+    if open_brackets > close_brackets:
+        if open_braces > close_braces:
+            json_str += "}"
+            open_braces -= 1
+        json_str += "]"
+        
+    if open_braces > json_str.count("}"):
+        for _ in range(open_braces - json_str.count("}")):
+            json_str += "}"
+            
+    return json_str
+
 def calculate_deterministic_gaps(work_history_list):
-    """Computes mathematically precise chronological gaps using exact datetimes to eliminate ghost entries."""
+    """Computes mathematically precise chronological gaps using exact datetimes."""
     jobs = [j for j in work_history_list if isinstance(j, dict) and j.get("company") != "N/A"]
     if not jobs:
         return work_history_list
@@ -183,7 +213,7 @@ def calculate_deterministic_gaps(work_history_list):
 
 
 def enrich_work_history(work_history_list):
-    """Intercepts extracted history and matches it against your master parquet database."""
+    """Intercepts extracted history and matches it against your master hospital database."""
     if HOSPITAL_DB is None:
         return work_history_list
         
@@ -263,6 +293,7 @@ def build_pdf(data: dict, manual_licenses: list, manual_certs: list, highlights:
     pdf.cell(0, 6, pdf._clean(data.get("contact_info", "")), ln=True, align="C")
     pdf.ln(6)
 
+    # Standard Highlights Section
     if highlights.strip():
         pdf.section_heading("Candidate Highlights")
         for line in highlights.split("\n"):
@@ -447,9 +478,10 @@ if st.session_state["parsed_payload"] is None:
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 
                 try:
+                    # ENHANCEMENT 1: Capped lookahead ceiling expanded to 8,000 max output tokens
                     message = client.messages.create(
                         model="claude-sonnet-4-6",
-                        max_tokens=4000,
+                        max_tokens=8000,
                         system=SYSTEM_PROMPT,
                         messages=[{"role": "user", "content": f"Parse:\n\n{resume_text}"}],
                     )
@@ -467,13 +499,11 @@ if st.session_state["parsed_payload"] is None:
                 if start_idx != -1 and end_idx != -1:
                     clean_json_string = raw_content[start_idx:end_idx+1]
                     
-                    # ENHANCED ROLLBACK SLICER: Discards structural text fragments past the last complete job object
                     if not clean_json_string.endswith("}") and not clean_json_string.endswith("]"):
                         last_complete_brace = clean_json_string.rfind("}")
                         if last_complete_brace != -1:
                             clean_json_string = clean_json_string[:last_complete_brace + 1]
                     
-                    # Clean trailing commas and balance array closures
                     clean_json_string = re.sub(r',\s*([\]}])', r'\1', clean_json_string)
                     if clean_json_string.count("[") > clean_json_string.count("]"):
                         clean_json_string += "]"

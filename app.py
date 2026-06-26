@@ -1,6 +1,6 @@
 """
-Healthcare Resume Parser & Candidate Profile Generator (Self-Healing JSON v4.0)
-=============================================================================
+Healthcare Resume Parser & Candidate Profile Generator (Self-Healing Framework v4.1)
+===================================================================================
 """
 import streamlit as st
 import anthropic
@@ -106,10 +106,44 @@ Your output must match this structural schema exactly:
 }"""
 
 # ---------------------------------------------------------
-# 4. PYTHON CHRONOLOGY MATRIX (Deterministic Gap Calculator)
+# 4. CHRONOLOGY MATRIX & DETENSIVE REPAIR SYSTEM
 # ---------------------------------------------------------
+def clean_and_balance_json(json_str):
+    """Programmatically completes unclosed JSON objects caused by text stream truncation."""
+    json_str = json_str.strip()
+    
+    # Pre-parse cleanup: repair lingering text artifacts or trailing delimiters
+    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+    
+    # If the text was cut off right on a comma or property boundary, drop it cleanly
+    if json_str.endswith(','):
+        json_str = json_str[:-1]
+        
+    # Check for unclosed value markers
+    if json_str.count('"') % 2 != 0:
+        json_str += '"'
+        
+    # Programmatically count and append missing structural markers
+    open_brackets = json_str.count("[")
+    close_brackets = json_str.count("]")
+    open_braces = json_str.count("{")
+    close_braces = json_str.count("}")
+    
+    if open_brackets > close_brackets:
+        # If it broke mid-object inside an array, close the active object first
+        if open_braces > close_braces:
+            json_str += "}"
+            open_braces -= 1
+        json_str += "]"
+        
+    if open_braces > json_str.count("}"):
+        for _ in range(open_braces - json_str.count("}")):
+            json_str += "}"
+            
+    return json_str
+
 def calculate_deterministic_gaps(work_history_list):
-    """Computes mathematically precise chronological gaps using exact datetimes to eliminate ghost entries."""
+    """Computes mathematically precise chronological gaps using exact datetimes."""
     jobs = [j for j in work_history_list if isinstance(j, dict) and j.get("company") != "N/A"]
     if not jobs:
         return work_history_list
@@ -183,7 +217,7 @@ def calculate_deterministic_gaps(work_history_list):
 
 
 def enrich_work_history(work_history_list):
-    """Intercepts extracted history and matches it against your master parquet database."""
+    """Intercepts extracted history and matches it against your master hospital database."""
     if HOSPITAL_DB is None:
         return work_history_list
         
@@ -443,6 +477,9 @@ if st.session_state["parsed_payload"] is None:
                 else:
                     resume_text = uploaded_file.read().decode("utf-8")
                 
+                # SANITIZER: Clean up tricky characters to avoid string crashes
+                resume_text = resume_text.replace("•", "-").replace("·", "-").replace("\xa0", " ")
+                
                 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                 
                 try:
@@ -466,8 +503,8 @@ if st.session_state["parsed_payload"] is None:
                 if start_idx != -1 and end_idx != -1:
                     clean_json_string = raw_content[start_idx:end_idx+1]
                     
-                    # ENHANCED ENCRYPTED REPAIR MATRIX: Automatically sanitizes trailing array commas
-                    clean_json_string = re.sub(r',\s*([\]}])', r'\1', clean_json_string)
+                    # SELF-HEALING REPAIR MATRIX: Cleans and safely terminates incomplete arrays
+                    clean_json_string = clean_and_balance_json(clean_json_string)
                     
                     try:
                         parsed_data = json.loads(clean_json_string)

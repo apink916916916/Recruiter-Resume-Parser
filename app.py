@@ -59,8 +59,8 @@ if not st.session_state["authenticated"]:
 # 3. GLOBAL CONFIGURATIONS & THE BLUEPRINT TEMPLATE
 # ---------------------------------------------------------
 STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "Compact RN"]
-MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT"]
-CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC", "ARRT (MR)", "ARRT (R)"]
+MODALITIES = ["RN", "LPN", "CNA", "LPT", "CLS", "SLP", "SLPA", "PT" "Echo Tech"]
+CERTS_LIST = ["ACLS", "BLS", "PALS", "TNCC", "ENPC", "CEN", "CCRN", "AWHONN - Advanced", "AWHONN - Intermediate", "NRP", "C-EFM", "CIC", "CNE", "CNM", "CNOR", "COHN", "CPEN", "CPI", "MAB", "CRNFA", "CWCN", "CWON", "FNP", "NCSN", "OCN", "ONC", "WCC", "ARRT (MR)", "ARRT (R)", "ARDMS RVT", "ARDMS RDCS"]
 EMR_LIST = ["Epic", "Cerner", "MEDITECH", "TruBridge / CPSI", "McKesson", "Allscripts / Altera", "MatrixCare", "PointClickCare", "Not Specified / Paper Charting"]
 
 EXECUTIVE_CHECKLIST_TEMPLATE = (
